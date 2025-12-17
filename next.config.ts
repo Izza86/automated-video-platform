@@ -5,11 +5,17 @@ const nextConfig: NextConfig = {
     bodySizeLimit: '1000mb', // Increase limit to 1GB for video uploads
   },
   images: {
-    domains: ['images.unsplash.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
+    ],
   },
-  experimental: {
-    serverComponentsExternalPackages: ['sharp', 'fluent-ffmpeg'],
-  },
+  // Optimize production builds
+  swcMinify: true,
+  // Enable React strict mode for better performance
+  reactStrictMode: true,
 };
 
 export default nextConfig;

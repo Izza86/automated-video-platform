@@ -1,5 +1,7 @@
 "use client";
 import React, { useState, type ReactNode } from "react";
+import Link from "next/link";
+import Image from "next/image";
 // Assuming necessary external libraries like lucide-react are available
 // FIX: Importing Menu and X icons to resolve "Cannot find name 'X'" and "Cannot find name 'Menu'" errors.
 import { Menu, X, UploadCloud, Video, Sparkles, Volume2, VolumeX, Pause, Play } from 'lucide-react';
@@ -38,10 +40,13 @@ const Navbar = () => {
         >
           {/* Logo Image */}
           <div className="relative w-16 h-16 sm:w-20 sm:h-20">
-            <img 
+            <Image 
               src="/logoimage.png" 
               alt="Automated Video Editor Logo" 
+              width={80}
+              height={80}
               className="w-full h-full object-contain"
+              priority
             />
           </div>
           
@@ -96,12 +101,12 @@ const Navbar = () => {
             }}
           />
 
-          <NavLink
+          <Link
             href="/login"
             className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-300 font-medium text-sm shadow-lg shadow-purple-900/50 hover:scale-105 hover:shadow-xl hover:shadow-purple-500/50 ml-4"
           >
             Login
-          </NavLink>
+          </Link>
         </div>
 
         {/* Mobile Menu Button - Now using imported icons X and Menu */}
@@ -126,12 +131,13 @@ const Navbar = () => {
           <NavLink href="#about" className="block text-white/80 hover:text-white text-base">
             About
           </NavLink>
-          <NavLink
+          <Link
             href="/login"
             className="block w-full text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition text-base"
+            onClick={() => setOpen(false)}
           >
             Login
-          </NavLink>
+          </Link>
         </div>
       )}
     </nav>
@@ -561,14 +567,14 @@ export default function Home() {
 
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 mt-12 animate-[fadeIn_1.2s_ease-out]">
-              <a href="/signup" 
+              <Link href="/signup" 
                 className="group relative inline-flex items-center justify-center px-8 py-4 text-lg rounded-2xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all duration-300 shadow-2xl shadow-purple-900/50 font-bold text-white overflow-hidden">
                 <span className="absolute inset-0 shimmer-effect"></span>
                 <span className="relative flex items-center gap-2">
                   <Sparkles className="w-5 h-5" />
                   Get Started Free
                 </span>
-              </a>
+              </Link>
               <a href="#features" 
                 className="inline-flex items-center justify-center px-8 py-4 text-lg rounded-2xl border-2 border-purple-500/50 hover:border-purple-400 bg-black/40 backdrop-blur-sm transition-all duration-300 font-semibold text-white hover:bg-purple-900/30">
                 <Video className="w-5 h-5 mr-2" />
@@ -1091,9 +1097,9 @@ export default function Home() {
                 <li className="flex items-center"><span className="text-white/40 mr-2">✗</span> Priority Support</li>
               </ul>
 
-              <a href="/signup" className="block w-full text-center py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 rounded-xl font-semibold text-white transition-all duration-300 shadow-lg hover:shadow-purple-600/50">
+              <Link href="/signup" className="block w-full text-center py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 rounded-xl font-semibold text-white transition-all duration-300 shadow-lg hover:shadow-purple-600/50">
                 Start Free Trial
-              </a>
+              </Link>
             </div>
             
             {/* Pricing Card 2: Pro (Highlighted) */}
@@ -1114,9 +1120,9 @@ export default function Home() {
                 <li className="flex items-center"><span className="text-green-400 mr-2">✓</span> Priority Support</li>
               </ul>
 
-              <a href="/signup" className="block w-full text-center py-4 bg-white text-purple-800 rounded-xl font-bold text-lg hover:bg-gray-200 transition-all duration-300 shadow-lg hover:shadow-xl">
+              <Link href="/signup" className="block w-full text-center py-4 bg-white text-purple-800 rounded-xl font-bold text-lg hover:bg-gray-200 transition-all duration-300 shadow-lg hover:shadow-xl">
                 Choose Pro
-              </a>
+              </Link>
             </div>
 
             {/* Pricing Card 3: Enterprise */}
@@ -1221,7 +1227,7 @@ export default function Home() {
               <li><a href="#features" className="hover:text-purple-300 transition">Features</a></li>
               <li><a href="#pricing" className="hover:text-purple-300 transition">Pricing</a></li>
               <li><a href="#use-cases" className="hover:text-purple-300 transition">Use Cases</a></li>
-              <li><a href="/login" className="hover:text-purple-300 transition">Login</a></li>
+              <li><Link href="/login" className="hover:text-purple-300 transition">Login</Link></li>
             </ul>
           </div>
 

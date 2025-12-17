@@ -18,7 +18,8 @@ import {
   Mail,
   Sliders,
   CheckSquare,
-  Headphones
+  Headphones,
+  CreditCard
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,7 @@ const baseNavigation = [
   { name: "My Projects", href: "/dashboard/my-projects", icon: FileVideo },
   { name: "Templates", href: "/dashboard/templates", icon: LayoutDashboard },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+  { name: "Billing", href: "/dashboard/billing", icon: CreditCard },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -41,6 +43,7 @@ const adminNavigation = [
   { name: "Account Management", href: "/dashboard/admin/accounts", icon: Lock },
   { name: "Content Moderation", href: "/dashboard/admin/content", icon: FolderOpen },
   { name: "Analytics & Reports", href: "/dashboard/admin/analytics", icon: BarChart3 },
+  { name: "Billing & Revenue", href: "/dashboard/admin/billing", icon: CreditCard },
   { name: "Communication", href: "/dashboard/admin/communication", icon: Mail },
   { name: "Quota Management", href: "/dashboard/admin/quotas", icon: Database },
   { name: "Bulk Operations", href: "/dashboard/admin/bulk", icon: CheckSquare },
