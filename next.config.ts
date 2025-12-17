@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverActions: {
-    bodySizeLimit: '1000mb', // Increase limit to 1GB for video uploads
-  },
   images: {
     remotePatterns: [
       {
@@ -11,11 +8,17 @@ const nextConfig: NextConfig = {
         hostname: 'images.unsplash.com',
       },
     ],
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 60,
   },
-  // Optimize production builds
-  swcMinify: true,
   // Enable React strict mode for better performance
   reactStrictMode: true,
+  // Optimize output for production
+  compress: true,
+  // Generate ETags for caching
+  generateEtags: true,
+  // Disable powered by header
+  poweredByHeader: false,
 };
 
 export default nextConfig;

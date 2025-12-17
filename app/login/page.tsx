@@ -1,5 +1,11 @@
 import { LoginForm } from "@/components/forms/login-form";
 import { LampAnimation } from "@/components/lamp-animation";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Login - Automated Video Editor",
+  description: "Sign in to your account and continue creating amazing videos",
+};
 
 export default function LoginPage() {
   return (

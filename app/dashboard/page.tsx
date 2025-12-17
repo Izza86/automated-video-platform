@@ -18,6 +18,9 @@ import { db } from "@/db/drizzle";
 import { user } from "@/db/schema";
 import { count } from "drizzle-orm";
 
+// Revalidate every 30 seconds for fresh data
+export const revalidate = 30;
+
 export default async function Dashboard() {
   const { currentUser } = await getCurrentUser();
   const organizations: any[] = [];

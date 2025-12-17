@@ -1,5 +1,11 @@
 import { SignupForm } from "@/components/forms/signup-form";
 import { LampAnimation } from "@/components/lamp-animation";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Sign Up - Automated Video Editor",
+  description: "Create your account and start making professional videos with AI",
+};
 
 export default function SignupPage() {
   return (

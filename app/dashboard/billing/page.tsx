@@ -58,8 +58,11 @@ export default function BillingPage() {
 		try {
 			const response = await fetch("/api/subscription");
 			if (response.ok) {
-				const data = await response.json();
-				setSubscriptionData(data);
+				const contentType = response.headers.get("content-type");
+				if (contentType && contentType.includes("application/json")) {
+					const data = await response.json();
+					setSubscriptionData(data);
+				}
 			}
 		} catch (error) {
 			console.error("Failed to fetch subscription:", error);
@@ -88,6 +91,10 @@ export default function BillingPage() {
 			});
 
 			if (response.ok) {
+				const contentType = response.headers.get("content-type");
+				if (contentType && contentType.includes("application/json")) {
+					await response.json();
+				}
 				toast.success("Subscription cancelled successfully");
 				fetchSubscription();
 			} else {
@@ -112,6 +119,10 @@ export default function BillingPage() {
 			});
 
 			if (response.ok) {
+				const contentType = response.headers.get("content-type");
+				if (contentType && contentType.includes("application/json")) {
+					await response.json();
+				}
 				toast.success("Subscription resumed successfully");
 				fetchSubscription();
 			} else {
