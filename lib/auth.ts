@@ -1,67 +1,81 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { lastLoginMethod, organization } from "better-auth/plugins";
-import { Resend } from "resend";
-import OrganizationInvitationEmail from "@/components/emails/organization-invitation";
-import ForgotPasswordEmail from "@/components/emails/reset-password";
-import VerifyEmail from "@/components/emails/verify-email";
+import { lastLoginMethod } from "better-auth/plugins";
 import { db } from "@/db/drizzle";
 import { schema } from "@/db/schema";
-import { getActiveOrganization } from "@/server/organizations";
-import { admin, member, owner } from "./auth/permissions";
-
-const resend = new Resend(process.env.RESEND_API_KEY as string);
+import { Resend } from "resend";
 
 export const auth = betterAuth({
-  emailVerification: {
-    sendVerificationEmail: async ({ user, url }) => {
-      await resend.emails.send({
-        from: `${process.env.EMAIL_SENDER_NAME} <${process.env.EMAIL_SENDER_ADDRESS}>`,
-        to: user.email,
-        subject: "Verify your email",
-        react: VerifyEmail({ username: user.name, verifyUrl: url }),
-      });
-    },
-    sendOnSignUp: true,
-  },
+  baseURL: process.env.BETTER_AUTH_URL as string,
+  trustedOrigins: ["http://localhost:3000"],
+  secret: process.env.BETTER_AUTH_SECRET as string,
   socialProviders: {
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID as string,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+      redirectURI: `${process.env.BETTER_AUTH_URL}/api/auth/callback/google`,
     },
   },
   emailAndPassword: {
     enabled: true,
+    requireEmailVerification: false, // Temporarily disabled for testing
     sendResetPassword: async ({ user, url }) => {
-      await resend.emails.send({
-        from: `${process.env.EMAIL_SENDER_NAME} <${process.env.EMAIL_SENDER_ADDRESS}>`,
-        to: user.email,
-        subject: "Reset your password",
-        react: ForgotPasswordEmail({
-          username: user.name,
-          resetUrl: url,
-          userEmail: user.email,
-        }),
-      });
+      try {
+        console.log("🔐 Sending password reset email to:", user.email);
+        console.log("🔑 Resend API Key exists:", !!process.env.RESEND_API_KEY);
+        
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        
+        const { data, error } = await resend.emails.send({
+          from: `${process.env.EMAIL_SENDER_NAME} <${process.env.EMAIL_SENDER_ADDRESS}>`,
+          to: user.email,
+          subject: 'Reset Your Password',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: linear-gradient(135deg, #3b0764 0%, #5b21b6 100%); padding: 40px; text-align: center; border-radius: 10px 10px 0 0;">
+                <h1 style="color: white; margin: 0;">Password Reset Request</h1>
+              </div>
+              <div style="padding: 40px; background: #f9f9f9;">
+                <p style="font-size: 16px; color: #333;">Hi ${user.name},</p>
+                <p style="font-size: 16px; color: #333;">We received a request to reset your password. Click the button below to create a new password:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${url}" style="background: #3b0764; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                    Reset Password
+                  </a>
+                </div>
+                <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+                <p style="font-size: 14px; color: #3b0764; word-break: break-all;">${url}</p>
+                <p style="font-size: 14px; color: #666; margin-top: 30px;">This link will expire in 24 hours.</p>
+                <p style="font-size: 14px; color: #666;">If you didn't request this, please ignore this email.</p>
+              </div>
+              <div style="padding: 20px; text-align: center; background: #333; color: white; font-size: 12px; border-radius: 0 0 10px 10px;">
+                <p>© 2025 Automated Video Editor. All rights reserved.</p>
+              </div>
+            </div>
+          `,
+        });
+
+        if (error) {
+          console.error("❌ Failed to send password reset email:", error);
+          throw error;
+        }
+        
+        console.log("✅ Password reset email sent successfully:", data);
+      } catch (error) {
+        console.error("❌ Error in sendResetPassword:", error);
+        throw error;
+      }
     },
-    requireEmailVerification: true,
   },
-  databaseHooks: {
-    session: {
-      create: {
-        before: async (session) => {
-          const activeOrganization = await getActiveOrganization(
-            session.userId
-          );
-          return {
-            data: {
-              ...session,
-              activeOrganizationId: activeOrganization?.id,
-            },
-          };
-        },
-      },
+  emailVerification: {
+    sendOnSignUp: false, // Disabled - no verification email sent
+    autoSignInAfterVerification: true,
+    expiresIn: 86400, // Token valid for 24 hours (1 day) = 86400 seconds
+    sendVerificationEmail: async ({ user, url }) => {
+      // Email verification disabled - just log for development
+      console.log("📧 Email verification skipped for:", user.email);
+      return;
     },
   },
   database: drizzleAdapter(db, {
@@ -69,29 +83,6 @@ export const auth = betterAuth({
     schema,
   }),
   plugins: [
-    organization({
-      sendInvitationEmail: async (data) => {
-        const inviteLink = `${process.env.NEXT_PUBLIC_APP_URL}/api/accept-invitation/${data.id}`;
-
-        await resend.emails.send({
-          from: `${process.env.EMAIL_SENDER_NAME} <${process.env.EMAIL_SENDER_ADDRESS}>`,
-          to: data.email,
-          subject: "You've been invited to join our organization",
-          react: OrganizationInvitationEmail({
-            email: data.email,
-            invitedByUsername: data.inviter.user.name,
-            invitedByEmail: data.inviter.user.email,
-            teamName: data.organization.name,
-            inviteLink,
-          }),
-        });
-      },
-      roles: {
-        owner,
-        admin,
-        member,
-      },
-    }),
     lastLoginMethod(),
     nextCookies(),
   ],
