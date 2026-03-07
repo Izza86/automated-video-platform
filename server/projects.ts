@@ -4,6 +4,8 @@ import { db } from "@/server/db";
 import { project } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { getCurrentUser } from "./users";
+import * as fs from "fs";
+import * as path from "path";
 
 export interface ProjectMetadata {
   templateName?: string;
@@ -22,23 +24,24 @@ export interface CreateProjectInput {
 }
 
 export async function createProject(input: CreateProjectInput) {
+  // Generate a unique ID using timestamp and random string so it's available
+  // even if DB insertion fails and we need to fallback to disk storage.
+  const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
   try {
     const user = await getCurrentUser();
-    
+
     if (!user) {
       console.error("Project creation failed: User not authenticated");
       return { error: "User not authenticated" };
     }
 
-    console.log("Creating project for user:", user.id);
-    console.log("Project input:", { ...input, videoUrl: input.videoUrl.substring(0, 50) + '...' });
-
-    // Generate a unique ID using timestamp and random string
-    const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    console.log("Creating project for user:", user.currentUser.id);
+    console.log("Project input:", { ...input, videoUrl: input.videoUrl.substring(0, 50) + "..." });
 
     const newProject = await db.insert(project).values({
       id: projectId,
-      userId: user.id,
+      userId: user.currentUser.id,
       name: input.name,
       type: input.type,
       videoUrl: input.videoUrl,
@@ -52,11 +55,39 @@ export async function createProject(input: CreateProjectInput) {
     return { success: true, project: newProject[0] };
   } catch (error) {
     console.error("Error creating project:", error);
-    if (error instanceof Error) {
-      console.error("Error message:", error.message);
-      console.error("Error stack:", error.stack);
+    const errMsg = error instanceof Error ? error.message : String(error);
+
+    // Development fallback: if DB or auth is down locally, persist project
+    // to a local file so the user doesn't lose work. Do NOT enable this in
+    // production.
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        const devDir = path.join(process.cwd(), "dev-data", "projects");
+        await fs.promises.mkdir(devDir, { recursive: true });
+
+        const fallback = {
+          id: projectId,
+          userId: (error as any)?.user?.id || "dev-guest",
+          name: input.name,
+          type: input.type,
+          videoUrl: input.videoUrl,
+          thumbnail: input.thumbnail || null,
+          metadata: input.metadata || null,
+          createdAt: new Date().toISOString(),
+        };
+
+        const fallbackPath = path.join(devDir, `${projectId}.json`);
+        await fs.promises.writeFile(fallbackPath, JSON.stringify(fallback, null, 2), "utf8");
+        console.log("Saved fallback project to disk:", fallbackPath);
+
+        return { success: true, project: fallback };
+      } catch (fsErr) {
+        console.error("Fallback write failed:", fsErr);
+      }
     }
-    return { error: "Failed to create project" };
+
+    // Return the underlying error message for debugging in non-production
+    return { error: errMsg || "Failed to create project" };
   }
 }
 
@@ -71,7 +102,7 @@ export async function getUserProjects() {
     const projects = await db
       .select()
       .from(project)
-      .where(eq(project.userId, user.id))
+      .where(eq(project.userId, user.currentUser.id))
       .orderBy(desc(project.createdAt));
 
     return { success: true, projects };
@@ -100,7 +131,7 @@ export async function deleteProject(projectId: string) {
       return { error: "Project not found" };
     }
 
-    if (existingProject[0].userId !== user.id) {
+    if (existingProject[0].userId !== user.currentUser.id) {
       return { error: "Unauthorized" };
     }
 
@@ -131,7 +162,7 @@ export async function getProject(projectId: string) {
       return { error: "Project not found" };
     }
 
-    if (projectData[0].userId !== user.id) {
+    if (projectData[0].userId !== user.currentUser.id) {
       return { error: "Unauthorized" };
     }
 

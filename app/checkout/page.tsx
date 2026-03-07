@@ -51,7 +51,13 @@ function CheckoutContent() {
 	useEffect(() => {
 		if (!plan) {
 			toast.error("Invalid plan selected");
-			router.push("/pricing");
+			(async () => {
+				try {
+					await router.prefetch("/pricing");
+				} finally {
+					router.push("/pricing");
+				}
+			})();
 		}
 	}, [plan, router]);
 

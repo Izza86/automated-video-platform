@@ -1,13 +1,19 @@
 {
-  "name": "better-auth-starter",
-  "version": "0.1.0",
+  "name": "automated-video-editor",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbopack",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build",
     "start": "next start",
-    "lint": "eslint .",
-    "prepare": "husky"
+    "lint": "npx @biomejs/biome check .",
+    "lint:fix": "npx @biomejs/biome check --write .",
+    "format": "npx @biomejs/biome format --write .",
+    "prepare": "husky",
+    "db:studio": "dotenv -e .env -- drizzle-kit studio",
+    "db:push": "dotenv -e .env -- drizzle-kit push",
+    "db:migrate": "dotenv -e .env -- drizzle-kit migrate",
+    "db:seed": "tsx scripts/seed-subscription-plans.js"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
@@ -35,6 +41,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.66.1",
+    "recharts": "^3.7.0",
     "resend": "^6.5.2",
     "sonner": "^2.0.7",
     "stripe": "^20.1.0",
@@ -47,6 +54,7 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.6",
     "@types/react-dom": "^19.2.3",
+    "cross-env": "^10.1.0",
     "drizzle-kit": "^0.31.7",
     "husky": "^9.1.7",
     "tailwindcss": "^4.1.17",

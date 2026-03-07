@@ -124,6 +124,7 @@ export function SignupForm({
 
     if (success) {
       toast.success("Signup successful! Your account has been created. You can now login.");
+      await router.prefetch("/login");
       router.push("/login");
     } else {
       toast.error(message as string);
@@ -270,6 +271,7 @@ export function SignupForm({
             </FormItem>
             {/* Submit Button */}
             <Button
+              data-prefetch="/login"
               className="w-full h-12 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-[1.02]"
               disabled={isLoading}
               type="submit"

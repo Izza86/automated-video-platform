@@ -1,0 +1,13 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Next.js Dev Server",
+			"type": "shell",
+			"command": "cd c:\\automated-video-editor && npx cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbopack",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

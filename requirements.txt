@@ -1,0 +1,20 @@
+opencv-python-headless
+scenedetect[opencv]
+numpy
+scikit-learn
+# ── ML Models for Professional Video Analysis ──
+madmom>=0.16.1
+librosa>=0.10.0
+soundfile>=0.12.0
+scikit-image>=0.22.0
+scipy>=1.11.0
+# ── Real Neural Network Models ──
+# TransNetV2: 3D DDCNN shot boundary detection (Teed & Deng 2020)
+transnetv2
+# PyTorch + TorchVision: RAFT optical flow, VGG-19 Gram matrix
+torch>=2.0.0
+torchvision>=0.15.0
+# Depth-Anything V2: Monocular depth estimation via HuggingFace
+transformers>=4.30.0
+# timm: Required by MiDaS DPT and some HuggingFace vision models
+timm>=0.9.0

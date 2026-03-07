@@ -7,8 +7,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { Member } from "@/db/schema";
 import MembersTableAction from "./members-table-action";
+
+/** Lightweight member type for the organization table. */
+interface Member {
+  id: string;
+  role: string;
+  user: { name: string; email: string };
+}
 
 type MembersTableProps = {
   members: Member[];

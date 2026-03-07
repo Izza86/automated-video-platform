@@ -71,6 +71,7 @@ export function ResetPasswordForm({
       toast.error(error.message);
     } else {
       toast.success("Password reset successfully");
+      await router.prefetch("/login");
       router.push("/login");
     }
 

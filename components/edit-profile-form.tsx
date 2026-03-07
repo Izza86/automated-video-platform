@@ -63,6 +63,7 @@ export function EditProfileForm({ currentUser }: EditProfileFormProps) {
 
       if (result.success) {
         toast.success(result.message);
+        await router.prefetch("/dashboard");
         router.push("/dashboard");
         router.refresh();
       } else {
@@ -153,7 +154,11 @@ export function EditProfileForm({ currentUser }: EditProfileFormProps) {
         
         <Button
           type="button"
-          onClick={() => router.push("/dashboard")}
+          data-prefetch="/dashboard"
+          onClick={async () => {
+            await router.prefetch("/dashboard");
+            router.push("/dashboard");
+          }}
           className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white"
         >
           Cancel

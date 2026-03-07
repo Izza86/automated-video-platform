@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { boolean, pgEnum, pgTable, text, timestamp, jsonb, integer, decimal } from "drizzle-orm/pg-core";
+import { boolean, index, pgEnum, pgTable, text, timestamp, jsonb, integer, decimal, uniqueIndex } from "drizzle-orm/pg-core";
 
 // User role enum: Admin and Non-Admin
 export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
@@ -29,16 +29,20 @@ export const user = pgTable("user", {
     .$defaultFn(() => false)
     .notNull(),
   image: text("image"),
-  profilePhoto: text("profile_photo"), // User uploaded profile photo
-  role: userRoleEnum("role").$defaultFn(() => "user").notNull(), // Default role is 'user' (Non-Admin)
-  stripeCustomerId: text("stripe_customer_id"), // Stripe customer ID
+  profilePhoto: text("profile_photo"),
+  role: userRoleEnum("role").$defaultFn(() => "user").notNull(),
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at")
-    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .$defaultFn(() => new Date())
     .notNull(),
   updatedAt: timestamp("updated_at")
-    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => ([
+  index("user_email_idx").on(table.email),
+  index("user_role_idx").on(table.role),
+  index("user_stripe_customer_idx").on(table.stripeCustomerId),
+]));
 
 export const session = pgTable("session", {
   id: text("id").primaryKey(),
@@ -51,7 +55,10 @@ export const session = pgTable("session", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-});
+}, (table) => ([
+  index("session_user_id_idx").on(table.userId),
+  index("session_token_idx").on(table.token),
+]));
 
 export const account = pgTable("account", {
   id: text("id").primaryKey(),
@@ -100,7 +107,10 @@ export const project = pgTable("project", {
   updatedAt: timestamp("updated_at")
     .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => ([
+  index("project_user_id_idx").on(table.userId),
+  index("project_created_at_idx").on(table.createdAt),
+]));
 
 // Subscription plans table
 export const subscriptionPlan = pgTable("subscription_plan", {
@@ -121,7 +131,6 @@ export const subscriptionPlan = pgTable("subscription_plan", {
     .notNull(),
 });
 
-// User subscriptions table
 export const subscription = pgTable("subscription", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -144,15 +153,18 @@ export const subscription = pgTable("subscription", {
   updatedAt: timestamp("updated_at")
     .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => ([
+  index("subscription_user_id_idx").on(table.userId),
+  index("subscription_stripe_id_idx").on(table.stripeSubscriptionId),
+  index("subscription_status_idx").on(table.status),
+]));
 
-// Usage tracking table
 export const usage = pgTable("usage", {
   id: text("id").primaryKey(),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-  month: integer("month").notNull(), // 1-12
+  month: integer("month").notNull(),
   year: integer("year").notNull(),
   videosCreated: integer("videos_created").$defaultFn(() => 0).notNull(),
   createdAt: timestamp("created_at")
@@ -161,9 +173,10 @@ export const usage = pgTable("usage", {
   updatedAt: timestamp("updated_at")
     .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => ([
+  uniqueIndex("usage_user_month_year_idx").on(table.userId, table.month, table.year),
+]));
 
-// Payment history table
 export const payment = pgTable("payment", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -174,11 +187,13 @@ export const payment = pgTable("payment", {
   stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   currency: text("currency").notNull().$defaultFn(() => "usd"),
-  status: text("status").notNull(), // succeeded, failed, pending
+  status: text("status").notNull(),
   createdAt: timestamp("created_at")
     .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => ([
+  index("payment_user_id_idx").on(table.userId),
+]));
 
 export type User = typeof user.$inferSelect;
 export type Project = typeof project.$inferSelect;
@@ -186,6 +201,42 @@ export type SubscriptionPlan = typeof subscriptionPlan.$inferSelect;
 export type Subscription = typeof subscription.$inferSelect;
 export type Usage = typeof usage.$inferSelect;
 export type Payment = typeof payment.$inferSelect;
+
+// ── Relations (enables Drizzle relational queries) ─────────────────────
+export const userRelations = relations(user, ({ many }) => ({
+  sessions: many(session),
+  accounts: many(account),
+  projects: many(project),
+  subscriptions: many(subscription),
+  usages: many(usage),
+  payments: many(payment),
+}));
+
+export const sessionRelations = relations(session, ({ one }) => ({
+  user: one(user, { fields: [session.userId], references: [user.id] }),
+}));
+
+export const accountRelations = relations(account, ({ one }) => ({
+  user: one(user, { fields: [account.userId], references: [user.id] }),
+}));
+
+export const projectRelations = relations(project, ({ one }) => ({
+  user: one(user, { fields: [project.userId], references: [user.id] }),
+}));
+
+export const subscriptionRelations = relations(subscription, ({ one }) => ({
+  user: one(user, { fields: [subscription.userId], references: [user.id] }),
+  plan: one(subscriptionPlan, { fields: [subscription.planId], references: [subscriptionPlan.id] }),
+}));
+
+export const usageRelations = relations(usage, ({ one }) => ({
+  user: one(user, { fields: [usage.userId], references: [user.id] }),
+}));
+
+export const paymentRelations = relations(payment, ({ one }) => ({
+  user: one(user, { fields: [payment.userId], references: [user.id] }),
+  subscription: one(subscription, { fields: [payment.subscriptionId], references: [subscription.id] }),
+}));
 
 export const schema = {
   user,
@@ -197,4 +248,12 @@ export const schema = {
   subscription,
   usage,
   payment,
+  // Relations
+  userRelations,
+  sessionRelations,
+  accountRelations,
+  projectRelations,
+  subscriptionRelations,
+  usageRelations,
+  paymentRelations,
 };

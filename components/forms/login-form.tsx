@@ -72,6 +72,7 @@ export function LoginForm({
 
     if (success) {
       toast.success(message as string);
+      await router.prefetch("/dashboard");
       router.push("/dashboard");
     } else {
       toast.error(message as string);
@@ -180,6 +181,7 @@ export function LoginForm({
 
             {/* Submit Button */}
             <Button
+              data-prefetch="/dashboard"
               className="w-full h-12 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-[1.02]"
               disabled={isLoading}
               type="submit"

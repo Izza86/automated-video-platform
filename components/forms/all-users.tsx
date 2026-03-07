@@ -6,10 +6,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import type { User } from "@/db/schema";
 import { authClient } from "@/lib/auth-client";
-import { Button } from "./ui/button";
+import { Button } from "@/components/ui/button";
+
+type UserLike = Pick<User, "id" | "name" | "email">;
 
 type AllUsersProps = {
-  users: User[];
+  users: UserLike[];
   organizationId: string;
 };
 
@@ -17,7 +19,7 @@ export default function AllUsers({ users, organizationId }: AllUsersProps) {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  const handleInviteMember = async (user: User) => {
+  const handleInviteMember = async (user: UserLike) => {
     try {
       setIsLoading(true);
       const { error } = await authClient.organization.inviteMember({

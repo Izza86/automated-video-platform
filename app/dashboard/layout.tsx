@@ -1,5 +1,5 @@
-import { DashboardSidebar } from "@/components/dashboard-sidebar";
-import { DashboardNavbar } from "@/components/dashboard-navbar";
+import { redirect } from "next/navigation";
+import { DashboardShell } from "@/components/dashboard-shell";
 import { getCurrentUser } from "@/server/users";
 
 export default async function DashboardLayout({
@@ -7,16 +7,20 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { currentUser } = await getCurrentUser();
+  const result = await getCurrentUser();
+
+  // getCurrentUser returns null when the DB is temporarily unreachable
+  // (e.g. pool exhaustion during heavy FFmpeg processing).
+  if (!result) {
+    redirect("/login");
+  }
+
+  const { currentUser } = result;
   const isAdmin = currentUser?.role === "admin";
-  
+
   return (
-    <div className="min-h-screen bg-[#0a0a0a]">
-      <DashboardSidebar isAdmin={isAdmin} />
-      <div className="ml-64">
-        <DashboardNavbar currentUser={currentUser} />
-        {children}
-      </div>
-    </div>
+    <DashboardShell isAdmin={isAdmin} currentUser={currentUser}>
+      {children}
+    </DashboardShell>
   );
 }

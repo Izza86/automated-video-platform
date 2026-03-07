@@ -26,7 +26,7 @@ export default async function ViewProfilePage() {
   });
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-screen bg-[#1a1408] text-white">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <Link 
           href="/dashboard" 
@@ -60,7 +60,7 @@ export default async function ViewProfilePage() {
               <p className="text-white/60 mt-1 break-all">{currentUser.email}</p>
               <div className="flex flex-wrap justify-center sm:justify-start gap-2 mt-3">
                 <Badge className="bg-purple-600">
-                  {currentUser.role === "admin" ? "Administrator" : "User"}
+                  {(currentUser.role as string) === "admin" ? "Administrator" : "User"}
                 </Badge>
                 {currentUser.emailVerified ? (
                   <Badge className="bg-green-600 flex items-center gap-1">

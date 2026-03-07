@@ -6,9 +6,11 @@ import { db } from "@/db/drizzle";
 import { schema } from "@/db/schema";
 import { Resend } from "resend";
 
+const appUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
+
 export const auth = betterAuth({
-  baseURL: process.env.BETTER_AUTH_URL as string,
-  trustedOrigins: ["http://localhost:3000"],
+  baseURL: appUrl,
+  trustedOrigins: [appUrl, process.env.NEXT_PUBLIC_APP_URL || ""].filter(Boolean),
   secret: process.env.BETTER_AUTH_SECRET as string,
   socialProviders: {
     google: {
@@ -50,7 +52,7 @@ export const auth = betterAuth({
                 <p style="font-size: 14px; color: #666;">If you didn't request this, please ignore this email.</p>
               </div>
               <div style="padding: 20px; text-align: center; background: #333; color: white; font-size: 12px; border-radius: 0 0 10px 10px;">
-                <p>© 2025 Automated Video Editor. All rights reserved.</p>
+                <p>© ${new Date().getFullYear()} Automated Video Editor. All rights reserved.</p>
               </div>
             </div>
           `,

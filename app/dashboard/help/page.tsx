@@ -46,29 +46,33 @@ export default function HelpSupportPage() {
 
   const quickLinks = [
     {
-      title: "Getting Started Guide",
-      description: "Learn the basics of video editing with our platform",
-      icon: Book,
-      color: "from-blue-600 to-cyan-600"
-    },
-    {
-      title: "Video Tutorials",
-      description: "Watch step-by-step tutorial videos",
+      title: "Upload & Edit",
+      description: "Start editing videos with AI-powered tools",
       icon: Video,
-      color: "from-purple-600 to-pink-600"
+      color: "from-blue-600 to-cyan-600",
+      href: "/dashboard/upload-edit",
     },
     {
-      title: "Best Practices",
-      description: "Tips for optimal video editing results",
+      title: "Templates",
+      description: "Browse pre-made editing style templates",
       icon: Zap,
-      color: "from-green-600 to-emerald-600"
+      color: "from-purple-600 to-pink-600",
+      href: "/dashboard/templates",
     },
     {
-      title: "Documentation",
-      description: "Detailed technical documentation",
+      title: "My Projects",
+      description: "View and manage your video projects",
       icon: FileText,
-      color: "from-orange-600 to-amber-600"
-    }
+      color: "from-green-600 to-emerald-600",
+      href: "/dashboard/my-projects",
+    },
+    {
+      title: "Analytics",
+      description: "Track your video creation stats",
+      icon: Book,
+      color: "from-orange-600 to-amber-600",
+      href: "/dashboard/analytics",
+    },
   ];
 
   const contactOptions = [
@@ -82,12 +86,12 @@ export default function HelpSupportPage() {
       title: "Live Chat",
       description: "Available Mon-Fri, 9am-5pm EST",
       icon: MessageCircle,
-      action: "#"
+      action: "mailto:support@automatedvideoeditor.com?subject=Live%20Support%20Request"
     }
   ];
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-[#1a1408] text-white">
       <div className="pt-16">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
           {/* Header */}
@@ -131,8 +135,9 @@ export default function HelpSupportPage() {
               {quickLinks.map((link, index) => {
                 const Icon = link.icon;
                 return (
-                  <button
+                  <Link
                     key={index}
+                    href={link.href}
                     className="bg-gradient-to-br from-[#1a1a2e] to-[#0f0f1e] border border-purple-500/30 rounded-xl p-6 hover:border-purple-500/60 transition-all group text-left"
                   >
                     <div className={`w-12 h-12 rounded-lg bg-gradient-to-r ${link.color} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
@@ -143,7 +148,7 @@ export default function HelpSupportPage() {
                     <div className="flex items-center gap-1 text-purple-400 text-sm mt-3 group-hover:gap-2 transition-all">
                       Learn more <ChevronRight className="w-4 h-4" />
                     </div>
-                  </button>
+                  </Link>
                 );
               })}
             </div>
@@ -153,7 +158,13 @@ export default function HelpSupportPage() {
           <div>
             <h2 className="text-2xl font-bold mb-6">Frequently Asked Questions</h2>
             <div className="space-y-3">
-              {faqs.map((faq, index) => (
+              {faqs
+                .filter((faq) =>
+                  !searchQuery ||
+                  faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  faq.answer.toLowerCase().includes(searchQuery.toLowerCase())
+                )
+                .map((faq, index) => (
                 <div
                   key={index}
                   className="bg-gradient-to-br from-[#1a1a2e] to-[#0f0f1e] border border-purple-500/30 rounded-xl overflow-hidden"

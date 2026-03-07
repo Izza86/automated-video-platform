@@ -24,8 +24,8 @@ interface ProjectMetadata {
   effects?: string[];
 }
 
-interface SavedProject extends Project {
-  metadata?: ProjectMetadata;
+interface SavedProject extends Omit<Project, 'metadata'> {
+  metadata?: ProjectMetadata | null;
 }
 
 export default function MyProjectsPage() {
@@ -62,6 +62,10 @@ export default function MyProjectsPage() {
   };
 
   const handleDownload = (project: SavedProject) => {
+    if (!project.videoUrl) {
+      toast.error('No video available for this project');
+      return;
+    }
     const a = document.createElement('a');
     a.href = project.videoUrl;
     a.download = `${project.name}.mp4`;
@@ -99,7 +103,7 @@ export default function MyProjectsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-[#1a1408] text-white">
       <div className="pt-16">
         <div className="max-w-7xl mx-auto p-6 space-y-6">
           {/* Header */}
@@ -158,11 +162,17 @@ export default function MyProjectsPage() {
                 >
                   {/* Video Thumbnail */}
                   <div className="relative aspect-video bg-black">
-                    <video
-                      src={project.videoUrl}
-                      className="w-full h-full object-cover"
-                      muted
-                    />
+                    {project.videoUrl ? (
+                      <video
+                        src={project.videoUrl}
+                        className="w-full h-full object-cover"
+                        muted
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                        <FileVideo className="w-12 h-12 text-gray-600" />
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button
                         onClick={() => handlePreview(project)}
@@ -216,13 +226,19 @@ export default function MyProjectsPage() {
 
                     {/* Actions */}
                     <div className="flex gap-2 pt-2">
-                      <Button
-                        onClick={() => handleDownload(project)}
-                        className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-xs"
-                      >
-                        <Download className="w-3 h-3 mr-1" />
-                        Download
-                      </Button>
+                      {project.videoUrl ? (
+                        <Button
+                          onClick={() => handleDownload(project)}
+                          className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-xs"
+                        >
+                          <Download className="w-3 h-3 mr-1" />
+                          Download
+                        </Button>
+                      ) : (
+                        <Badge variant="outline" className="flex-1 text-center border-yellow-500/30 text-yellow-400 text-xs py-2">
+                          Analysis Only
+                        </Badge>
+                      )}
                       <Button
                         onClick={() => handleDelete(project.id)}
                         disabled={deleting === project.id}
@@ -260,12 +276,19 @@ export default function MyProjectsPage() {
             <div className="space-y-4">
               {/* Video Player */}
               <div className="aspect-video bg-black rounded-lg overflow-hidden">
-                <video
-                  src={selectedProject.videoUrl}
-                  controls
-                  autoPlay
-                  className="w-full h-full"
-                />
+                {selectedProject.videoUrl ? (
+                  <video
+                    src={selectedProject.videoUrl}
+                    controls
+                    autoPlay
+                    className="w-full h-full"
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
+                    <FileVideo className="w-16 h-16 mb-2 opacity-50" />
+                    <p>No video available — analysis-only project</p>
+                  </div>
+                )}
               </div>
 
               {/* Project Details */}
@@ -307,13 +330,15 @@ export default function MyProjectsPage() {
 
               {/* Actions */}
               <div className="flex gap-3">
-                <Button
-                  onClick={() => handleDownload(selectedProject)}
-                  className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Download Video
-                </Button>
+                {selectedProject.videoUrl && (
+                  <Button
+                    onClick={() => handleDownload(selectedProject)}
+                    className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Video
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   onClick={() => setIsDialogOpen(false)}

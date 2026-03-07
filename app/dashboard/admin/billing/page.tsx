@@ -65,7 +65,7 @@ export default async function AdminBillingPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Subscription Management</h1>
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Subscription Management</h1>
         <p className="text-muted-foreground mt-2">
           Monitor subscriptions, revenue, and billing analytics
         </p>
@@ -73,12 +73,12 @@ export default async function AdminBillingPage() {
 
       {/* Key Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
               Active Subscriptions
             </CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <Users className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.activeSubscriptions}</div>
@@ -88,10 +88,10 @@ export default async function AdminBillingPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">MRR</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <DollarSign className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(stats.mrr)}</div>
@@ -101,10 +101,10 @@ export default async function AdminBillingPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">ARR</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <TrendingUp className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(stats.arr)}</div>
@@ -114,10 +114,10 @@ export default async function AdminBillingPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">This Month</CardTitle>
-            <CalendarDays className="h-4 w-4 text-muted-foreground" />
+            <CalendarDays className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -132,7 +132,7 @@ export default async function AdminBillingPage() {
 
       {/* Subscriptions by Plan */}
       <div className="grid gap-4 md:grid-cols-2">
-        <Card>
+        <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader>
             <CardTitle>Subscriptions by Plan</CardTitle>
             <CardDescription>Distribution of active plans</CardDescription>
@@ -142,7 +142,7 @@ export default async function AdminBillingPage() {
               {stats.subscriptionsByPlan.map((plan) => (
                 <div key={plan.planName} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="h-2 w-2 rounded-full bg-primary" />
+                    <div className="h-2 w-2 rounded-full bg-purple-600" />
                     <span className="text-sm font-medium">{plan.planName}</span>
                   </div>
                   <span className="text-sm text-muted-foreground">
@@ -154,7 +154,7 @@ export default async function AdminBillingPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader>
             <CardTitle>Subscriptions by Status</CardTitle>
             <CardDescription>Current subscription states</CardDescription>
@@ -180,10 +180,10 @@ export default async function AdminBillingPage() {
       </div>
 
       {/* Recent Payments */}
-      <Card>
+      <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5" />
+            <CreditCard className="h-5 w-5 text-purple-600" />
             Recent Payments
           </CardTitle>
           <CardDescription>Latest successful transactions</CardDescription>
@@ -239,7 +239,7 @@ export default async function AdminBillingPage() {
       </Card>
 
       {/* All Subscriptions */}
-      <Card>
+      <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
         <CardHeader>
           <CardTitle>All Subscriptions</CardTitle>
           <CardDescription>Complete list of user subscriptions</CardDescription>

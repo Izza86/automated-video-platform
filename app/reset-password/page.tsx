@@ -1,28 +1,18 @@
-import Image from "next/image";
-import Link from "next/link";
 import { ResetPasswordForm } from "@/components/forms/reset-password-form";
+import LampWrapper from "@/components/login/lamp-wrapper";
 
-export default function LoginPage() {
+export default function ResetPasswordPage() {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-4 sm:p-6 md:p-10">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <Link
-          className="flex items-center gap-2 self-center font-medium"
-          href="/"
-        >
-          <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Image
-              alt="Better Auth Starter Logo"
-              height={50}
-              priority
-              src={"/better-auth-starter.png"}
-              width={50}
-            />
-          </div>
-          Better Auth Starter
-        </Link>
+    <LampWrapper label="RESET">
+      <div className="bg-white/10 border border-amber-400/30 rounded-3xl p-4 sm:p-6 lg:p-8 shadow-2xl shadow-amber-900/30 backdrop-blur-xl w-full max-w-md mx-auto">
+        <div className="text-center mb-4 sm:mb-6">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2 sm:mb-3">
+            Reset Password
+          </h1>
+          <p className="text-base sm:text-lg text-amber-200/80">Create a new secure password</p>
+        </div>
         <ResetPasswordForm />
       </div>
-    </div>
+    </LampWrapper>
   );
 }

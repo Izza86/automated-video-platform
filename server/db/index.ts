@@ -1,30 +1,10 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import * as schema from '../../db/schema';
-import dotenv from 'dotenv';
+/**
+ * Server DB barrel export — re-exports the singleton pool from db/drizzle.ts.
+ * Previously this file created a SECOND pool, causing connection exhaustion
+ * and bypassing the resilience logic (withDbRetry, resetPool, isConnectionError).
+ */
+export { db, isConnectionError, withDbRetry, resetPool } from '../../db/drizzle';
 
-dotenv.config();
-
-// Create PostgreSQL connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-});
-
-// Create drizzle instance
-export const db = drizzle(pool, { schema });
-
-// Test database connection
-export const testConnection = async () => {
-  try {
-    const client = await pool.connect();
-    console.log('✅ Database connected successfully');
-    client.release();
-    return true;
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    return false;
-  }
-};
-
+// Backward-compatible default export
+import { db } from '../../db/drizzle';
 export default db;

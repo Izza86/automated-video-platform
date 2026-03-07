@@ -135,14 +135,15 @@ export default function BillingPage() {
 		}
 	};
 
-	const handleUpgrade = () => {
+	const handleUpgrade = async () => {
+		await router.prefetch("/pricing");
 		router.push("/pricing");
 	};
 
 	if (loading) {
 		return (
 			<div className="flex items-center justify-center min-h-[400px]">
-				<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+				<Loader2 className="h-8 w-8 animate-spin text-purple-600" />
 			</div>
 		);
 	}
@@ -151,15 +152,15 @@ export default function BillingPage() {
 		return (
 			<div className="space-y-6">
 				<div>
-					<h1 className="text-3xl font-bold">Billing & Subscription</h1>
+					<h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Billing & Subscription</h1>
 					<p className="text-muted-foreground mt-2">
 						Manage your subscription and billing
 					</p>
 				</div>
 
-				<Card>
+				<Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/10 to-pink-900/10">
 					<CardHeader>
-						<CardTitle>No Active Subscription</CardTitle>
+						<CardTitle className="text-purple-400">No Active Subscription</CardTitle>
 						<CardDescription>
 							You're currently on the free plan
 						</CardDescription>
@@ -170,7 +171,7 @@ export default function BillingPage() {
 						</p>
 					</CardContent>
 					<CardFooter>
-						<Button onClick={handleUpgrade}>View Plans</Button>
+						<Button onClick={handleUpgrade} className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white">View Plans</Button>
 					</CardFooter>
 				</Card>
 			</div>
@@ -186,14 +187,14 @@ export default function BillingPage() {
 	return (
 		<div className="space-y-6">
 			<div>
-				<h1 className="text-3xl font-bold">Billing & Subscription</h1>
+				<h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Billing & Subscription</h1>
 				<p className="text-muted-foreground mt-2">
 					Manage your subscription and billing
 				</p>
 			</div>
 
 			{/* Current Plan */}
-			<Card>
+			<Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
 				<CardHeader>
 					<div className="flex items-start justify-between">
 						<div>
@@ -241,6 +242,7 @@ export default function BillingPage() {
 						<Button
 							onClick={handleResumeSubscription}
 							disabled={actionLoading}
+							className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
 						>
 							{actionLoading && (
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -249,13 +251,14 @@ export default function BillingPage() {
 						</Button>
 					) : (
 						<>
-							<Button variant="outline" onClick={handleUpgrade}>
+							<Button onClick={handleUpgrade} className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white">
 								Change Plan
 							</Button>
 							<Button
-								variant="destructive"
+								variant="outline"
 								onClick={handleCancelSubscription}
 								disabled={actionLoading}
+								className="border-red-500 text-red-600 hover:bg-red-500/10"
 							>
 								{actionLoading && (
 									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -268,10 +271,10 @@ export default function BillingPage() {
 			</Card>
 
 			{/* Usage */}
-			<Card>
+			<Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
 				<CardHeader>
 					<CardTitle className="flex items-center gap-2">
-						<TrendingUp className="h-5 w-5" />
+						<TrendingUp className="h-5 w-5 text-purple-600" />
 						Usage This Month
 					</CardTitle>
 					<CardDescription>
@@ -313,10 +316,10 @@ export default function BillingPage() {
 			</Card>
 
 			{/* Payment Method */}
-			<Card>
+			<Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
 				<CardHeader>
 					<CardTitle className="flex items-center gap-2">
-						<CreditCard className="h-5 w-5" />
+						<CreditCard className="h-5 w-5 text-purple-600" />
 						Payment Method
 					</CardTitle>
 					<CardDescription>
@@ -324,7 +327,7 @@ export default function BillingPage() {
 					</CardDescription>
 				</CardHeader>
 				<CardFooter>
-					<Button variant="outline" asChild>
+					<Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white" asChild>
 						<a
 							href={`https://billing.stripe.com/p/login/${process.env.NEXT_PUBLIC_STRIPE_PORTAL_KEY}`}
 							target="_blank"

@@ -1,25 +1,20 @@
-import { headers } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 
+/**
+ * Accept-invitation endpoint.
+ * Organization plugin is not enabled on the server, so this route
+ * simply redirects to the dashboard with a notice.
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ invitationId: string }> }
 ) {
   const { invitationId } = await params;
 
-  try {
-    const data = await auth.api.acceptInvitation({
-      body: {
-        invitationId,
-      },
-      headers: await headers(),
-    });
+  console.warn(
+    `Accept invitation called for ${invitationId}, but organization plugin is not configured.`
+  );
 
-    console.log(data);
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  } catch (error) {
-    console.error(error);
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
+  // Redirect to dashboard — the invitation cannot be processed without the org plugin.
+  return NextResponse.redirect(new URL("/dashboard", request.url));
 }

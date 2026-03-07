@@ -3,6 +3,7 @@
 import { eq, inArray, not } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { db } from "@/db/drizzle";
 import { user } from "@/db/schema";
 import { auth } from "@/lib/auth";
@@ -30,6 +31,22 @@ export const getCurrentUser = async () => {
       currentUser,
     };
   } catch (error) {
+    // Re-throw Next.js redirect errors — they must not be swallowed by catch.
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
+    // Gracefully handle DB/session query timeouts (e.g. pool exhaustion
+    // while FFmpeg is running) instead of crashing the Dashboard Layout.
+    const msg = error instanceof Error ? error.message : String(error);
+    const isTimeout =
+      /timeout|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|connection terminated|too many clients/i.test(msg);
+
+    if (isTimeout) {
+      console.warn("[getCurrentUser] DB query timed out — returning null so the layout can degrade gracefully:", msg);
+      return null;
+    }
+
     console.error("Error getting current user:", error);
     redirect("/login");
   }
@@ -101,7 +118,7 @@ export const updateUserRole = async (userId: string, newRole: string) => {
       };
     }
 
-    await db.update(user).set({ role: newRole }).where(eq(user.id, userId));
+    await db.update(user).set({ role: newRole as "admin" | "user" }).where(eq(user.id, userId));
 
     return {
       success: true,
@@ -166,7 +183,7 @@ export const updateUserByAdmin = async (
     await db.update(user).set({ 
       name,
       email,
-      role
+      role: role as "admin" | "user"
     }).where(eq(user.id, userId));
 
     return {
@@ -327,7 +344,7 @@ export const addNewUser = async (
       });
 
       if (newUser) {
-        await db.update(user).set({ role }).where(eq(user.id, newUser.id));
+        await db.update(user).set({ role: role as "admin" | "user" }).where(eq(user.id, newUser.id));
       }
     }
 
@@ -477,4 +494,12 @@ export const signUp = async (
       message: e.message || "An unknown error occurred.",
     };
   }
+};
+
+// Compatibility helper: return users for an organization (simple wrapper)
+export const getUsers = async (organizationId: string) => {
+  // If you later implement organizations/members tables, replace this
+  // with a real lookup filtered by `organizationId`.
+  const res = await getAllUsers();
+  return res.success ? res.users : [];
 };

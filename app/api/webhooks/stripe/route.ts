@@ -124,8 +124,8 @@ async function handleSubscriptionUpdate(stripeSubscription: Stripe.Subscription)
     planId: plan.id,
     stripeSubscriptionId: stripeSubscription.id,
     status: stripeSubscription.status as any,
-    currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
-    currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+    currentPeriodStart: new Date(stripeSubscription.items.data[0]?.current_period_start * 1000),
+    currentPeriodEnd: new Date(stripeSubscription.items.data[0]?.current_period_end * 1000),
     cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
     canceledAt: stripeSubscription.canceled_at
       ? new Date(stripeSubscription.canceled_at * 1000)
@@ -166,28 +166,38 @@ async function handleSubscriptionDeleted(stripeSubscription: Stripe.Subscription
 }
 
 async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
-  const userId = invoice.subscription_details?.metadata?.userId;
+  const userId = invoice.parent?.subscription_details?.metadata?.userId;
 
   if (!userId) {
+    return;
+  }
+
+  const subscriptionId = invoice.parent?.subscription_details?.subscription;
+
+  if (!subscriptionId) {
     return;
   }
 
   const [sub] = await db
     .select()
     .from(subscription)
-    .where(eq(subscription.stripeSubscriptionId, invoice.subscription as string))
+    .where(eq(subscription.stripeSubscriptionId, subscriptionId as string))
     .limit(1);
 
   if (!sub) {
     return;
   }
 
-  // Record payment
+  // Record payment — use first payment's payment_intent if available
+  const paymentIntentId = (invoice as any).payment_intent
+    ?? invoice.payments?.data?.[0]?.payment?.payment_intent
+    ?? crypto.randomUUID();
+
   await db.insert(payment).values({
     id: crypto.randomUUID(),
     userId,
     subscriptionId: sub.id,
-    stripePaymentIntentId: invoice.payment_intent as string,
+    stripePaymentIntentId: paymentIntentId as string,
     amount: (invoice.amount_paid / 100).toString(),
     currency: invoice.currency,
     status: "succeeded",
@@ -195,16 +205,22 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {
-  const userId = invoice.subscription_details?.metadata?.userId;
+  const userId = invoice.parent?.subscription_details?.metadata?.userId;
 
   if (!userId) {
+    return;
+  }
+
+  const subscriptionId = invoice.parent?.subscription_details?.subscription;
+
+  if (!subscriptionId) {
     return;
   }
 
   const [sub] = await db
     .select()
     .from(subscription)
-    .where(eq(subscription.stripeSubscriptionId, invoice.subscription as string))
+    .where(eq(subscription.stripeSubscriptionId, subscriptionId as string))
     .limit(1);
 
   if (!sub) {
@@ -221,11 +237,15 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
     .where(eq(subscription.id, sub.id));
 
   // Record failed payment
+  const paymentIntentId = (invoice as any).payment_intent
+    ?? invoice.payments?.data?.[0]?.payment?.payment_intent
+    ?? crypto.randomUUID();
+
   await db.insert(payment).values({
     id: crypto.randomUUID(),
     userId,
     subscriptionId: sub.id,
-    stripePaymentIntentId: invoice.payment_intent as string,
+    stripePaymentIntentId: paymentIntentId as string,
     amount: (invoice.amount_due / 100).toString(),
     currency: invoice.currency,
     status: "failed",

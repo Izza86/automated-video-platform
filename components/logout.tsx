@@ -10,11 +10,12 @@ export function Logout() {
 
   const handleLogout = async () => {
     await authClient.signOut();
+    await router.prefetch("/");
     router.push("/");
   };
 
   return (
-    <Button onClick={handleLogout} variant="outline">
+    <Button data-prefetch="/" onClick={handleLogout} variant="outline">
       Logout <LogOut className="size-4" />
     </Button>
   );

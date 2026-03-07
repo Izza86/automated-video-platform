@@ -1,34 +1,27 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Video, FileVideo, Sparkles, CheckCircle, AlertCircle, Play, Download, Loader2, Eye, Palette, Music, Zap, Film } from "lucide-react";
+import {
+  ArrowLeft, Upload, Video, FileVideo, Sparkles, CheckCircle,
+  AlertCircle, Play, Download, Loader2, Eye,
+  Zap, RotateCcw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile } from "@ffmpeg/util";
-import { createProject } from "@/server/projects";
+import { useAnalysisDashboard } from "@/lib/hooks/use-analysis-dashboard";
+import dynamic from "next/dynamic";
 
-interface VideoMetadata {
-  // Visual & Color Elements
-  colorProfile: string;
-  brightness: number;
-  contrast: number;
-  saturation: number;
-  sharpness: number;
-  vignette: number;
-  aspectRatio: string;
-  fps: number;
-  
-  // Audio Elements
-  hasAudio: boolean;
-  audioVolume: number;
-  
-  // Pacing Elements
-  duration: number;
-  transitionStyle: string;
-}
+// Lazy-load analysis components (they pull in recharts which is heavy)
+const AnalysisDashboard = dynamic(
+  () => import("@/components/analysis/analysis-dashboard").then((m) => m.AnalysisDashboard),
+  { ssr: false, loading: () => <div className="animate-pulse h-64 bg-white/5 rounded-xl" /> }
+);
+const AnalysisProgressBar = dynamic(
+  () => import("@/components/analysis/analysis-dashboard").then((m) => m.AnalysisProgressBar),
+  { ssr: false }
+);
 
 export default function UploadEditPage() {
   const [referenceVideo, setReferenceVideo] = useState<File | null>(null);
@@ -39,44 +32,18 @@ export default function UploadEditPage() {
   const [progress, setProgress] = useState(0);
   const [completed, setCompleted] = useState(false);
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string>("");
-  const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
-  const [analyzingRef, setAnalyzingRef] = useState(false);
-  const [extractedMetadata, setExtractedMetadata] = useState<VideoMetadata | null>(null);
   const [currentStep, setCurrentStep] = useState<string>("");
-  
-  const ffmpegRef = useRef<FFmpeg | null>(null);
 
-  // Load FFmpeg on mount
+  // New analysis hook — replaces the old extractedMetadata state
+  const analysis = useAnalysisDashboard();
+
+  // Derived convenience booleans
+  const analyzingRef = analysis.progress.stage !== "idle" && analysis.progress.stage !== "complete" && analysis.progress.stage !== "error";
+
+  // Remove FFmpeg loading - we'll use backend instead
   useEffect(() => {
-    // Only initialize FFmpeg on client side
-    if (typeof window !== 'undefined') {
-      ffmpegRef.current = new FFmpeg();
-      loadFFmpeg();
-    }
+    // Nothing to load on client
   }, []);
-
-  const loadFFmpeg = async () => {
-    const ffmpeg = ffmpegRef.current;
-    
-    if (!ffmpeg) {
-      console.error('FFmpeg not initialized');
-      return;
-    }
-    
-    try {
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      await ffmpeg.load({
-        coreURL: `${baseURL}/ffmpeg-core.js`,
-        wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-      });
-      
-      setFfmpegLoaded(true);
-      toast.success('Video processing engine loaded successfully');
-    } catch (error) {
-      console.error('Failed to load FFmpeg:', error);
-      toast.error('Failed to load video processing engine');
-    }
-  };
 
   // Create preview URLs when videos are uploaded
   useEffect(() => {
@@ -103,23 +70,7 @@ export default function UploadEditPage() {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setReferenceVideo(file);
-      
-      // Automatically analyze reference video
-      if (ffmpegLoaded) {
-        setAnalyzingRef(true);
-        toast.info('Analyzing reference video style...');
-        
-        try {
-          const metadata = await analyzeReferenceVideo(file);
-          setExtractedMetadata(metadata);
-          toast.success('Reference video analyzed successfully!');
-        } catch (error) {
-          console.error('Analysis error:', error);
-          toast.error('Failed to analyze reference video');
-        } finally {
-          setAnalyzingRef(false);
-        }
-      }
+      toast.info('Reference video uploaded — will analyze when you process.');
     }
   };
 
@@ -129,177 +80,128 @@ export default function UploadEditPage() {
     }
   };
 
-  const analyzeReferenceVideo = async (file: File): Promise<VideoMetadata> => {
-    const ffmpeg = ffmpegRef.current;
-    
-    if (!ffmpeg) {
-      throw new Error('FFmpeg not initialized');
-    }
-    
-    // Write file to FFmpeg filesystem
-    await ffmpeg.writeFile('reference.mp4', await fetchFile(file));
-    
-    // Extract video properties (simulated analysis - in production, you'd use ffprobe)
-    // For now, we'll return reasonable defaults that will be applied
-    const metadata: VideoMetadata = {
-      colorProfile: "vibrant",
-      brightness: 0.1,
-      contrast: 1.3,
-      saturation: 1.2,
-      sharpness: 1.1,
-      vignette: 0.3,
-      aspectRatio: "16:9",
-      fps: 30,
-      hasAudio: true,
-      audioVolume: 0.8,
-      duration: 10,
-      transitionStyle: "fade"
-    };
-    
-    return metadata;
-  };
-
   const handleProcess = async () => {
-    if (!referenceVideo || !targetVideo || !extractedMetadata) {
+    if (!referenceVideo || !targetVideo) {
       toast.error('Please upload both videos first');
       return;
     }
 
-    if (!ffmpegLoaded || !ffmpegRef.current) {
-      toast.error('Video processing engine is still loading');
-      return;
-    }
-    
     setProcessing(true);
     setProgress(0);
     setCompleted(false);
-    
-    try {
-      const ffmpeg = ffmpegRef.current;
-      
-      // Track progress
-      ffmpeg.on('progress', ({ progress: prog }) => {
-        const percentage = Math.round(prog * 100);
-        setProgress(percentage);
-      });
+    let didComplete = false;
 
-      setCurrentStep('Loading videos...');
-      setProgress(5);
-      
-      // Write both reference and target files to FFmpeg filesystem
-      await ffmpeg.writeFile('reference.mp4', await fetchFile(referenceVideo));
-      await ffmpeg.writeFile('target.mp4', await fetchFile(targetVideo));
-      
-      setCurrentStep('Extracting audio from reference video...');
-      setProgress(15);
-      
-      // Extract audio from reference video
-      await ffmpeg.exec([
-        '-i', 'reference.mp4',
-        '-vn', // No video
-        '-acodec', 'aac',
-        '-b:a', '192k',
-        'ref_audio.aac'
-      ]);
-      
-      setCurrentStep('Applying color grading to target video...');
-      setProgress(25);
-      
-      // Build comprehensive FFmpeg filter chain based on extracted metadata
-      const filters: string[] = [];
-      
-      // 🎨 Visual & Color Elements
-      filters.push(`eq=brightness=${extractedMetadata.brightness}:contrast=${extractedMetadata.contrast}:saturation=${extractedMetadata.saturation}`);
-      
-      // Add sharpness
-      if (extractedMetadata.sharpness > 1) {
-        filters.push(`unsharp=5:5:${extractedMetadata.sharpness}:5:5:0.0`);
+    try {
+      // ── Stage 1: Analyze & Transfer via unified endpoint ──────────
+      setCurrentStep('Running full pipeline: analysis → blueprint → instructions → render…');
+      setProgress(10);
+
+      let result: Awaited<ReturnType<typeof analysis.analyze>>['data'] = null;
+      let pipelineError: string | null = null;
+
+      try {
+        const response = await analysis.analyze(referenceVideo, targetVideo, {
+          strategy: "proportional",
+          preserveBeats: true,
+          includeStyle: true,
+          outputMode: "both",
+        });
+        result = response.data;
+        pipelineError = response.error;
+      } catch (analyzeErr) {
+        // Catch unexpected throws from the hook itself so the UI never crashes
+        console.error('analysis.analyze threw:', analyzeErr);
+        const errMsg = analyzeErr instanceof Error ? analyzeErr.message : 'Unexpected analysis error';
+        toast.error(errMsg);
+        setProcessing(false);
+        setProgress(0);
+        return;
       }
-      
-      // Add vignette effect
-      if (extractedMetadata.vignette > 0) {
-        filters.push(`vignette=PI/${extractedMetadata.vignette * 10}`);
+
+      // Total failure — no data at all
+      if (!result) {
+        throw new Error(pipelineError || "Pipeline failed — check server logs for details.");
       }
-      
-      setCurrentStep('Adding transitions and effects...');
-      setProgress(45);
-      
-      // Add fade in/out transitions
-      filters.push('fade=t=in:st=0:d=1,fade=t=out:st=4:d=1');
-      
-      // Add slight film grain for cinematic look
-      filters.push('noise=alls=3:allf=t');
-      
-      setCurrentStep('Processing video without audio...');
-      setProgress(60);
-      
-      // Combine all filters
-      const filterComplex = filters.join(',');
-      
-      // Apply visual effects to target video (without audio)
-      await ffmpeg.exec([
-        '-i', 'target.mp4',
-        '-vf', filterComplex,
-        '-an', // Remove original audio
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        'target_processed.mp4'
-      ]);
-      
-      setCurrentStep('Looping reference audio to match target video length...');
-      setProgress(75);
-      
-      // Loop reference audio to match or exceed target video duration
-      await ffmpeg.exec([
-        '-stream_loop', '-1', // Loop audio indefinitely
-        '-i', 'ref_audio.aac',
-        '-i', 'target_processed.mp4',
-        '-map', '0:a', // Map audio from first input (looped reference audio)
-        '-map', '1:v', // Map video from second input (processed target)
-        '-c:v', 'copy', // Copy video without re-encoding
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-shortest', // Cut when video ends
-        'output.mp4'
-      ]);
-      
-      setCurrentStep('Preparing download...');
-      setProgress(95);
-      
-      // Read the output file
-      const data = await ffmpeg.readFile('output.mp4');
-      
-      // Create blob URL for preview and download
-      const blob = new Blob([data.buffer], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      
-      setProcessedVideoUrl(url);
+
+      setProgress(70);
+      setCurrentStep('Processing results…');
+
+      // ── Stage 2: Handle rendered output ───────────────────────────
+      // Prefer videoUrl (served from /outputs/) over base64 blob
+      if (result.output?.videoUrl) {
+        // Direct URL — browser fetches the mp4 from public/outputs/
+        setProcessedVideoUrl(result.output.videoUrl);
+        await saveToProjects(result.output.videoUrl, referenceVideo, targetVideo, result);
+      } else if (result.output?.videoBase64) {
+        try {
+          // Fallback: convert base64 → blob URL for <video> preview
+          const b64 = result.output.videoBase64.startsWith('data:')
+            ? result.output.videoBase64
+            : `data:video/mp4;base64,${result.output.videoBase64}`;
+          const resp = await fetch(b64);
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          setProcessedVideoUrl(url);
+          await saveToProjects(url, referenceVideo, targetVideo, result);
+        } catch (videoErr) {
+          console.warn('Video preview failed:', videoErr);
+          toast.warning('Analysis complete, but video preview failed to load.');
+          await saveToProjects("", referenceVideo, targetVideo, result);
+        }
+      } else if (pipelineError) {
+        // Render failed but analysis data is populated in dashboard cards
+        toast.warning('Analysis complete, but video preview failed to render.');
+        await saveToProjects("", referenceVideo, targetVideo, result);
+      } else {
+        toast.success('Analysis complete! Dashboard cards populated below.');
+        await saveToProjects("", referenceVideo, targetVideo, result);
+      }
+
       setProgress(100);
       setCompleted(true);
+      didComplete = true;
       setCurrentStep('Complete!');
-      
-      // Save to projects - await this to ensure it completes
-      await saveToProjects(url, referenceVideo, targetVideo, extractedMetadata);
-      
-      toast.success('Video processed successfully!', {
-        action: {
-          label: 'View Projects',
-          onClick: () => window.location.href = '/dashboard/my-projects'
-        }
-      });
-      
-      // Clean up FFmpeg files
-      await ffmpeg.deleteFile('reference.mp4');
-      await ffmpeg.deleteFile('target.mp4');
-      await ffmpeg.deleteFile('ref_audio.aac');
-      await ffmpeg.deleteFile('target_processed.mp4');
-      await ffmpeg.deleteFile('output.mp4');
-      
+
+      // Only show success toast if render actually produced a video
+      if (processedVideoUrl || result.output?.videoUrl || result.output?.videoBase64) {
+        toast.success('Video processed and saved!', {
+          action: {
+            label: 'View Projects',
+            onClick: () => window.location.href = '/dashboard/my-projects',
+          },
+        });
+      }
     } catch (error) {
       console.error('Processing error:', error);
-      toast.error('Failed to process video. Try with a smaller file.');
-      setProcessing(false);
-      setProgress(0);
+
+      let errorMessage: string;
+      if (
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+      ) {
+        errorMessage =
+          'Video processing timed out. Try a shorter or lower-resolution video.';
+      } else if (
+        error instanceof TypeError &&
+        /fetch|network/i.test(error.message)
+      ) {
+        errorMessage =
+          'Network connection lost during processing. Please check your connection and retry.';
+      } else {
+        errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+      }
+
+      toast.error(`Failed to process video: ${errorMessage}`);
+      setCurrentStep('');
+    } finally {
+      // Always reset processing state so the UI never gets stuck.
+      // Use the local `didComplete` flag (not the React state closure,
+      // which would be stale here).
+      if (!didComplete) {
+        setProcessing(false);
+        setProgress(0);
+      }
     }
   };
 
@@ -316,68 +218,187 @@ export default function UploadEditPage() {
     toast.success('Video downloaded successfully!');
   };
 
+  const handleRetryRender = async () => {
+    if (!referenceVideo || !targetVideo) {
+      toast.error('Original videos no longer available. Please upload again.');
+      return;
+    }
+
+    setProcessing(true);
+    setCompleted(false);
+    setProgress(50);
+    setCurrentStep('Re-trying render with analysis data…');
+
+    try {
+      const { data: result, error: pipelineError } = await analysis.analyze(referenceVideo, targetVideo, {
+        strategy: "proportional",
+        preserveBeats: true,
+        includeStyle: true,
+        outputMode: "both",
+      });
+
+      if (!result) {
+        throw new Error(pipelineError || "Retry failed");
+      }
+
+      if (result.output?.videoUrl) {
+        setProcessedVideoUrl(result.output.videoUrl);
+        toast.success('Video rendered successfully!');
+        await saveToProjects(result.output.videoUrl, referenceVideo, targetVideo, result);
+      } else if (result.output?.videoBase64) {
+        const b64 = result.output.videoBase64.startsWith('data:')
+          ? result.output.videoBase64
+          : `data:video/mp4;base64,${result.output.videoBase64}`;
+        const resp = await fetch(b64);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        setProcessedVideoUrl(url);
+        toast.success('Video rendered successfully!');
+
+        await saveToProjects(url, referenceVideo, targetVideo, result);
+      } else {
+        toast.warning('Render retry did not produce a video.');
+      }
+
+      setProgress(100);
+      setCompleted(true);
+      setCurrentStep('Complete!');
+    } catch (error) {
+      console.error('Retry render error:', error);
+      toast.error('Retry failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setCompleted(true);
+      setProgress(100);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const saveToProjects = async (
-    videoUrl: string, 
-    refVideo: File, 
-    targVideo: File, 
-    metadata: VideoMetadata
+    videoUrl: string,
+    refVideo: File,
+    targVideo: File,
+    pipelineResult: import("@/lib/types/analysis").AnalyzeAndTransferResponse,
   ) => {
     try {
       console.log('Starting to save project...');
       toast.info('Saving project to database...');
-      
-      // Convert blob URL to base64 for database storage
-      const response = await fetch(videoUrl);
-      const blob = await response.blob();
-      
-      console.log('Blob size:', blob.size, 'bytes');
-      
-      // Check if file is too large (>30MB)
-      const maxSize = 30 * 1024 * 1024; // 30MB
-      if (blob.size > maxSize) {
-        toast.warning('Video is large, this may take a moment to save...');
+
+      const summary = pipelineResult.blueprint?.summary;
+      const instrSummary = pipelineResult.instructions?.summary;
+
+      // ── Send as FormData to /api/save-project ──────────────────────
+      const form = new FormData();
+
+      // If we have a /outputs/ URL (file is on disk in public/), pass
+      // the URL string directly so the DB stores a lightweight path
+      // instead of a huge base64 blob.  Only fall back to blob upload
+      // for blob: URLs or data: URLs that can't be served by static file.
+      const isStaticUrl = videoUrl && videoUrl.startsWith('/outputs/');
+
+      if (isStaticUrl) {
+        // File is already in public/outputs — just store the URL path
+        // Send a zero-byte video placeholder (API will see size=0 and save URL from metadata)
+        const placeholder = new Blob([new Uint8Array(0)], { type: 'video/mp4' });
+        form.append('video', placeholder, `placeholder.mp4`);
+        form.append('videoUrlOverride', videoUrl);
+      } else if (videoUrl) {
+        const blobResp = await fetch(videoUrl);
+        const blob = await blobResp.blob();
+        console.log('Video blob size:', blob.size, 'bytes');
+
+        if (blob.size > 30 * 1024 * 1024) {
+          toast.warning('Video is large, this may take a moment to save...');
+        }
+        form.append('video', blob, `edited-${Date.now()}.mp4`);
+      } else {
+        // No rendered video — send a minimal placeholder blob
+        const placeholder = new Blob([new Uint8Array(0)], { type: 'video/mp4' });
+        form.append('video', placeholder, `analysis-only-${Date.now()}.mp4`);
       }
-      
-      // Convert blob to base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => {
-          resolve(reader.result as string);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      
-      const base64Video = await base64Promise;
-      console.log('Video converted to base64, length:', base64Video.length);
-      
-      const result = await createProject({
-        name: `${targVideo.name.split('.')[0]} - Edited`,
-        type: "reference-target",
-        videoUrl: base64Video,
-        metadata: {
+
+      form.append('name', `${targVideo.name.split('.')[0]} - Edited`);
+      form.append('type', 'reference-target');
+      form.append(
+        'metadata',
+        JSON.stringify({
           referenceVideoName: refVideo.name,
           targetVideoName: targVideo.name,
+          renderSucceeded: !!videoUrl,
           effects: [
-            `Brightness: ${metadata.brightness > 0 ? '+' : ''}${(metadata.brightness * 100).toFixed(0)}%`,
-            `Contrast: ${metadata.contrast.toFixed(1)}x`,
-            `Saturation: ${metadata.saturation.toFixed(1)}x`,
-            `Audio from reference (looped)`,
-            `Transitions: ${metadata.transitionStyle}`,
-          ],
-        }
+            `Pipeline: analysis → blueprint → instructions → render`,
+            summary ? `Duration: ${summary.totalDuration.toFixed(1)}s | ${summary.totalCuts} cuts | ${summary.totalSpeedRamps} speed ramps` : null,
+            summary ? `BPM: ${summary.bpm} (${(summary.bpmConfidence * 100).toFixed(0)}% confidence) | Pace: ${summary.dominantPace}` : null,
+            summary ? `Color: ${summary.dominantColorMood} / ${summary.dominantColorProfile} | Motion: ${summary.dominantMotionStyle}` : null,
+            instrSummary ? `Strategy: ${instrSummary.strategy} | ${instrSummary.totalCuts} cuts, ${instrSummary.totalSpeedSegments} speed segs, ${instrSummary.totalTransitions} transitions` : null,
+            instrSummary ? `Beat-snapped cuts: ${instrSummary.beatSnappedCuts}/${instrSummary.totalCuts}` : null,
+            pipelineResult.timing ? `Total processing: ${(pipelineResult.timing.totalMs / 1000).toFixed(1)}s` : null,
+            !videoUrl ? `⚠ Video render failed — analysis data only` : null,
+          ].filter(Boolean),
+          dashboardCards: pipelineResult.dashboard?.cards,
+        })
+      );
+
+      const result = await fetch('/api/save-project', {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
       });
 
-      if (!result.success) {
-        console.error('Failed to save project:', result.error);
-        toast.error('Failed to save project to database: ' + result.error);
+      // ── Parse response ────────────────────────────────────────────
+      let json: {
+        success?: boolean;
+        dbOffline?: boolean;
+        error?: string;
+        videoUrl?: string;
+        message?: string;
+      } = {};
+
+      try {
+        json = await result.json();
+      } catch {
+        // If JSON parsing fails, treat as offline but non-fatal
+        json = { success: false, dbOffline: true };
+      }
+
+      // ── The API now always returns 200.  Check the payload. ────────
+      if (json.dbOffline) {
+        // DB is unreachable but the video file is on disk
+        console.warn('[save] DB offline — video still available locally');
+        if (videoUrl) {
+          toast.warning(
+            'Video rendered successfully! Database is offline, but you can ' +
+            'still download the video below.',
+            { duration: 8000 }
+          );
+        } else {
+          toast.warning(
+            'Analysis complete. Database is offline — results saved locally only.',
+            { duration: 6000 }
+          );
+        }
+      } else if (json.success) {
+        // Detached save kicked off — video is immediate, DB save is background
+        console.log('Project save initiated in background:', json.message);
+        toast.success('Video ready! Project saving to database…');
       } else {
-        console.log('Project saved successfully to database');
-        toast.success('Project saved successfully!');
+        // Unexpected shape — still non-fatal, video exists on disk
+        console.warn('[save] Unexpected response:', json);
+        toast.warning('Video available for download. Database save may have failed.');
       }
     } catch (error) {
+      // ── Network-level fetch failure — still non-fatal ──────────────
       console.error('Error saving project:', error);
-      toast.error('Failed to save project: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      if (videoUrl) {
+        toast.warning(
+          'Video rendered but could not reach the server to save. ' +
+          'You can still download the output file below.',
+          { duration: 8000 }
+        );
+      } else {
+        toast.error(
+          'Failed to save: ' + (error instanceof Error ? error.message : 'Unknown error')
+        );
+      }
     }
   };
 
@@ -388,8 +409,8 @@ export default function UploadEditPage() {
     setProgress(0);
     setCompleted(false);
     setProcessedVideoUrl("");
-    setExtractedMetadata(null);
     setCurrentStep("");
+    analysis.reset();
     
     // Revoke object URLs
     if (processedVideoUrl) {
@@ -398,7 +419,7 @@ export default function UploadEditPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-[#1a1408] text-white">
       <div className="pt-16">
         <div className="max-w-6xl mx-auto p-6 space-y-6">
           {/* Header */}
@@ -434,7 +455,7 @@ export default function UploadEditPage() {
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-purple-400">3.</span>
-                <span>Our system applies: <strong>color grading, sharpness, film grain, vignette, transitions, fade effects</strong> to the ENTIRE target video</span>
+                <span>Our system applies: <strong>HALD CLUT deep color matching, frame interpolation (60fps), velocity alignment, grain, vignette, transitions</strong> to the ENTIRE target video</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="font-bold text-purple-400">4.</span>
@@ -447,94 +468,23 @@ export default function UploadEditPage() {
             </ol>
           </div>
 
-          {/* Extracted Metadata Display */}
-          {extractedMetadata && (
-            <div className="bg-gradient-to-br from-green-900/20 to-emerald-800/10 border border-green-500/30 rounded-xl p-6">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <CheckCircle className="w-6 h-6 text-green-400" />
-                Extracted Editing Style
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-black/20 rounded-lg p-4 border border-green-500/20">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Palette className="w-5 h-5 text-purple-400" />
-                    <h3 className="font-semibold">Visual & Color</h3>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Brightness:</span>
-                      <span className="text-white font-medium">{extractedMetadata.brightness > 0 ? '+' : ''}{(extractedMetadata.brightness * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Contrast:</span>
-                      <span className="text-white font-medium">{extractedMetadata.contrast.toFixed(1)}x</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Saturation:</span>
-                      <span className="text-white font-medium">{extractedMetadata.saturation.toFixed(1)}x</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Sharpness:</span>
-                      <span className="text-white font-medium">{extractedMetadata.sharpness.toFixed(1)}x</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Vignette:</span>
-                      <span className="text-white font-medium">{(extractedMetadata.vignette * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                </div>
+          {/* ═══════════════════════════════════════════════════════════
+              ANALYSIS PROGRESS + DYNAMIC DASHBOARD CARDS
+             ═══════════════════════════════════════════════════════════ */}
+          {analyzingRef && (
+            <AnalysisProgressBar
+              stage={analysis.progress.stage}
+              percent={analysis.progress.percent}
+              message={analysis.progress.message}
+            />
+          )}
 
-                <div className="bg-black/20 rounded-lg p-4 border border-green-500/20">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Music className="w-5 h-5 text-cyan-400" />
-                    <h3 className="font-semibold">Audio & Sound</h3>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Audio Volume:</span>
-                      <span className="text-white font-medium">{(extractedMetadata.audioVolume * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Audio Track:</span>
-                      <span className="text-white font-medium">{extractedMetadata.hasAudio ? 'Present' : 'None'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Fade In/Out:</span>
-                      <span className="text-white font-medium">1.0s</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Film Grain:</span>
-                      <span className="text-white font-medium">Applied</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-black/20 rounded-lg p-4 border border-green-500/20">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Film className="w-5 h-5 text-pink-400" />
-                    <h3 className="font-semibold">Pacing & Effects</h3>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">FPS:</span>
-                      <span className="text-white font-medium">{extractedMetadata.fps}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Aspect Ratio:</span>
-                      <span className="text-white font-medium">{extractedMetadata.aspectRatio}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Transitions:</span>
-                      <span className="text-white font-medium capitalize">{extractedMetadata.transitionStyle}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Color Profile:</span>
-                      <span className="text-white font-medium capitalize">{extractedMetadata.colorProfile}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {analysis.dashboard && (
+            <AnalysisDashboard
+              dashboard={analysis.dashboard}
+              blueprintSummary={analysis.blueprint?.summary ?? null}
+              timing={analysis.timing ?? null}
+            />
           )}
 
           {/* Upload Section */}
@@ -661,26 +611,47 @@ export default function UploadEditPage() {
                 </div>
               </div>
 
+              {/* Video Preview — only when render succeeded */}
               {completed && processedVideoUrl && (
-                <>
-                  {/* Processed Video Preview */}
-                  <div className="mb-4 bg-black/40 rounded-lg overflow-hidden border border-green-500/30">
-                    <div className="p-3 bg-green-900/20 border-b border-green-500/30 flex items-center gap-2">
-                      <Eye className="w-5 h-5 text-green-400" />
-                      <h3 className="font-semibold text-green-300">Processed Video Preview</h3>
-                    </div>
-                    <div className="aspect-video bg-black flex items-center justify-center">
-                      <video
-                        src={processedVideoUrl}
-                        controls
-                        autoPlay
-                        loop
-                        className="w-full h-full"
-                      />
-                    </div>
+                <div className="mb-4 bg-black/40 rounded-lg overflow-hidden border border-green-500/30">
+                  <div className="p-3 bg-green-900/20 border-b border-green-500/30 flex items-center gap-2">
+                    <Eye className="w-5 h-5 text-green-400" />
+                    <h3 className="font-semibold text-green-300">Processed Video Preview</h3>
                   </div>
-                  
-                  <div className="flex gap-3">
+                  <div className="aspect-video bg-black flex items-center justify-center">
+                    <video
+                      src={processedVideoUrl}
+                      controls
+                      autoPlay
+                      loop
+                      className="w-full h-full"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Render-failed notice + retry */}
+              {completed && !processedVideoUrl && (
+                <div className="mb-4 p-4 bg-yellow-900/20 border border-yellow-500/30 rounded-lg">
+                  <p className="text-yellow-400 text-sm flex items-center gap-2 mb-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    Analysis complete, but video preview failed to render. Dashboard cards are populated above.
+                  </p>
+                  <Button
+                    onClick={handleRetryRender}
+                    disabled={processing}
+                    className="bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 text-white text-sm"
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    {processing ? 'Retrying…' : 'Re-try Render'}
+                  </Button>
+                </div>
+              )}
+
+              {/* FORCE SHOW BUTTONS — always visible when progress hits 100% */}
+              {completed && (
+                <div className="flex gap-3">
+                  {processedVideoUrl && (
                     <Button 
                       onClick={handleDownload}
                       className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
@@ -688,14 +659,17 @@ export default function UploadEditPage() {
                       <Download className="w-4 h-4 mr-2" />
                       Download Edited Video
                     </Button>
-                    <Button 
-                      onClick={handleReset}
-                      className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
-                    >
-                      Edit Another Video
-                    </Button>
-                  </div>
-                </>
+                  )}
+                  <Button 
+                    onClick={handleReset}
+                    className={cn(
+                      "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white",
+                      !processedVideoUrl && "flex-1"
+                    )}
+                  >
+                    Edit Another Video
+                  </Button>
+                </div>
               )}
             </div>
           )}
@@ -705,7 +679,7 @@ export default function UploadEditPage() {
             <div className="flex justify-center">
               <Button
                 onClick={handleProcess}
-                disabled={!referenceVideo || !targetVideo || !extractedMetadata || analyzingRef}
+                disabled={!referenceVideo || !targetVideo || analyzingRef}
                 className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-8 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Play className="w-5 h-5 mr-2" />

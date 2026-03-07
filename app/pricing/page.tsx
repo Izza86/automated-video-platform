@@ -73,6 +73,7 @@ export default function PricingPage() {
 
 	const handleSubscribe = async (planName: string) => {
 		if (planName === "Free") {
+			await router.prefetch("/signup");
 			router.push("/signup");
 			return;
 		}
@@ -89,6 +90,7 @@ export default function PricingPage() {
 				? "pro-monthly"
 				: "pro-yearly";
 
+		await router.prefetch(`/checkout?plan=${priceId}`);
 		router.push(`/checkout?plan=${priceId}`);
 	};
 

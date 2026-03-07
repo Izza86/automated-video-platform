@@ -58,6 +58,7 @@ export function ChangePasswordForm() {
 
       if (result.success) {
         toast.success(result.message);
+        await router.prefetch("/dashboard");
         router.push("/dashboard");
       } else {
         toast.error(result.message);
@@ -186,7 +187,11 @@ export function ChangePasswordForm() {
         
         <Button
           type="button"
-          onClick={() => router.push("/dashboard")}
+          data-prefetch="/dashboard"
+          onClick={async () => {
+            await router.prefetch("/dashboard");
+            router.push("/dashboard");
+          }}
           className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white"
         >
           Cancel
