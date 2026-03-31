@@ -5,12 +5,16 @@ import { ArrowLeft, Headphones, MessageSquare, AlertCircle, CheckCircle, Clock }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-export default async function SupportPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function SupportPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = auth;
 
   const tickets = [
     { id: "#1234", user: "John Doe", subject: "Unable to upload video", status: "Open", priority: "High", time: "2 hours ago" },

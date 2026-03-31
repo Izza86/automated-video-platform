@@ -23,6 +23,43 @@ const AnalysisProgressBar = dynamic(
   { ssr: false }
 );
 
+/**
+ * Normalize a video URL to ensure it works in the browser:
+ * - Rewrites /outputs/filename.mp4 → /api/video/filename.mp4
+ *   (Next.js production mode only serves public/ files that existed at
+ *    build time; dynamically generated videos need the API route)
+ * - Appends a cache-busting query parameter to force the browser to fetch
+ *   the latest version (avoids stale black-screen from cached response)
+ */
+function cacheBustVideoUrl(url: string): string {
+  if (!url) return url;
+  // blob: and data: URLs don't need normalization
+  if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+
+  let normalized = url;
+
+  // Strip everything before /outputs/ (handles accidental absolute paths)
+  const idx = normalized.indexOf('/outputs/');
+  if (idx >= 0) {
+    normalized = normalized.slice(idx);
+  }
+
+  // Rewrite /outputs/filename.mp4 → /api/video/filename.mp4
+  if (normalized.startsWith('/outputs/')) {
+    const filename = normalized.replace('/outputs/', '');
+    normalized = `/api/video/${filename}`;
+  }
+
+  // If it already uses /api/video/, keep it
+  if (!normalized.startsWith('/api/video/')) {
+    return url;
+  }
+
+  // Append cache-busting timestamp
+  const separator = normalized.includes('?') ? '&' : '?';
+  return `${normalized}${separator}t=${Date.now()}`;
+}
+
 export default function UploadEditPage() {
   const [referenceVideo, setReferenceVideo] = useState<File | null>(null);
   const [targetVideo, setTargetVideo] = useState<File | null>(null);
@@ -130,7 +167,9 @@ export default function UploadEditPage() {
       // Prefer videoUrl (served from /outputs/) over base64 blob
       if (result.output?.videoUrl) {
         // Direct URL — browser fetches the mp4 from public/outputs/
-        setProcessedVideoUrl(result.output.videoUrl);
+        // Apply cache-busting so the browser never shows a stale/black frame
+        const freshUrl = cacheBustVideoUrl(result.output.videoUrl);
+        setProcessedVideoUrl(freshUrl);
         await saveToProjects(result.output.videoUrl, referenceVideo, targetVideo, result);
       } else if (result.output?.videoBase64) {
         try {
@@ -242,7 +281,8 @@ export default function UploadEditPage() {
       }
 
       if (result.output?.videoUrl) {
-        setProcessedVideoUrl(result.output.videoUrl);
+        const freshUrl = cacheBustVideoUrl(result.output.videoUrl);
+        setProcessedVideoUrl(freshUrl);
         toast.success('Video rendered successfully!');
         await saveToProjects(result.output.videoUrl, referenceVideo, targetVideo, result);
       } else if (result.output?.videoBase64) {

@@ -40,3 +40,13 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 node_modules
+
+# output videos (generated at runtime)
+public/outputs/*.mp4
+public/videos/*.mp4
+
+# temp build/test artifacts
+.tsc-output.txt
+check-headers.js
+test-video-route.js
+pnpm-workspace.yaml

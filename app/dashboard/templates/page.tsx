@@ -2,12 +2,16 @@ import { getCurrentUser } from "@/server/users";
 import { redirect } from "next/navigation";
 import TemplatesClient from "./templates-client";
 
-export default async function TemplatesPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser) {
+export default async function TemplatesPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser) {
     redirect("/login");
   }
+
+  const { currentUser } = auth;
 
   // Don't allow admin to access user pages
   if (currentUser.role === "admin") {

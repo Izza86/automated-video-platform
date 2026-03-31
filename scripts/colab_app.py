@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
 """
 Colab GPU Server — FastAPI + Ngrok Tunnel
 ==========================================
@@ -10,15 +11,16 @@ Models executed on GPU:
   • TransNetV2             — 3D DDCNN shot boundary detection
   • RAFT-Large             — Dense optical flow (torchvision)
   • Depth-Anything V2 Base — Monocular depth estimation (HuggingFace)
-  • VGG-19                 — Gram matrix style encoding (torchvision)
-  • librosa                     — Beat / onset detection (CPU, fast)
+  • Reinhard LAB           — Lightweight colour transfer (OpenCV, no weights)
+  • madmom RNN+DBN         — High-accuracy beat tracking (primary)
+  • librosa                     — Beat / onset detection (fallback)
 
 Endpoints:
   POST /process-video          — Full pipeline (all 5 modules)
   POST /analyze/shots          — Shot detection only
   POST /analyze/motion         — Motion / optical flow only
   POST /analyze/depth          — Depth estimation only
-  POST /analyze/color          — Color grading / VGG-19 only
+  POST /analyze/color          — Color grading / Reinhard LAB
   POST /analyze/beats          — Audio beat detection only
   GET  /health                 — Health check + GPU info
 
@@ -122,17 +124,6 @@ def get_depth_model():
                 print(f"[colab-gpu] MiDaS also failed: {e2}", flush=True)
                 _models["depth"] = None
     return _models["depth"]
-
-
-def get_vgg19():
-    if "vgg19" not in _models:
-        import torchvision.models as models
-        vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT).features.to(DEVICE).eval()
-        for p in vgg.parameters():
-            p.requires_grad = False
-        _models["vgg19"] = vgg
-        print("[colab-gpu] VGG-19 loaded on GPU", flush=True)
-    return _models["vgg19"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -640,13 +631,51 @@ def _empty_depth(dur=0):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  ANALYSIS MODULE 4: Color / VGG-19 Gram Style
+#  ANALYSIS MODULE 4: Color / Reinhard LAB Transfer
 # ═════════════════════════════════════════════════════════════════════════════
+
+def reinhard_lab_stats(frames):
+    """
+    Compute Reinhard color transfer statistics from sampled frames.
+
+    Converts each frame to CIELAB colour space and computes per-channel
+    mean and standard deviation.  These statistics are all that's needed
+    to transfer the colour "feel" of one video onto another using:
+
+        target_ch = (target_ch - target_mean) * (ref_std / target_std) + ref_mean
+
+    Returns per-channel LAB statistics averaged across all frames.
+    """
+    if not frames:
+        return None
+
+    all_L_mean, all_A_mean, all_B_mean = [], [], []
+    all_L_std, all_A_std, all_B_std = [], [], []
+
+    for frame in frames:
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB).astype(np.float32)
+        L, A, B = cv2.split(lab)
+
+        all_L_mean.append(float(np.mean(L)))
+        all_A_mean.append(float(np.mean(A)))
+        all_B_mean.append(float(np.mean(B)))
+        all_L_std.append(float(np.std(L)))
+        all_A_std.append(float(np.std(A)))
+        all_B_std.append(float(np.std(B)))
+
+    return {
+        "mean_L": round(float(np.mean(all_L_mean)), 2),
+        "mean_a": round(float(np.mean(all_A_mean)), 2),
+        "mean_b": round(float(np.mean(all_B_mean)), 2),
+        "std_L": round(float(np.mean(all_L_std)), 2),
+        "std_a": round(float(np.mean(all_A_std)), 2),
+        "std_b": round(float(np.mean(all_B_std)), 2),
+    }
+
 
 def analyze_color(video_path, n_frames=10):
     t0 = time.time()
     from sklearn.cluster import KMeans
-    from torchvision import transforms
 
     frms = extract_frames(video_path, fps=max(1, n_frames // 5), max_frames=n_frames, scale="320:-2")
     if not frms:
@@ -736,58 +765,8 @@ def analyze_color(video_path, n_frames=10):
             "avgBrightness": round(float(np.mean([v[2] for v in vals])) / 255, 4),
         }
 
-    # ── VGG-19 Gram matrix on GPU ─────────────────────────────────────
-    vgg_style = None
-    try:
-        vgg = get_vgg19()
-        preprocess = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-        style_layers = {"relu1_2": 3, "relu2_2": 8, "relu3_3": 15, "relu4_3": 24}
-        gram_sums = {name: None for name in style_layers}
-        n_vgg = 0
-        for frame in frames[:8]:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            tensor = preprocess(rgb).unsqueeze(0).to(DEVICE)
-            x = tensor
-            for idx_l, layer in enumerate(vgg):
-                x = layer(x)
-                for name, layer_idx in style_layers.items():
-                    if idx_l == layer_idx:
-                        b, c_, h_, w_ = x.size()
-                        feat = x.view(b * c_, h_ * w_)
-                        gram = torch.mm(feat, feat.t()).div(b * c_ * h_ * w_).cpu().numpy()
-                        if gram_sums[name] is None:
-                            gram_sums[name] = gram.astype(np.float64)
-                        else:
-                            gram_sums[name] += gram.astype(np.float64)
-            n_vgg += 1
-            del tensor, x
-        torch.cuda.empty_cache()
-
-        if n_vgg > 0:
-            layers_info = {}
-            for name in style_layers:
-                avg_g = gram_sums[name] / n_vgg
-                layers_info[name] = {
-                    "mean": round(float(np.mean(avg_g)), 6),
-                    "std": round(float(np.std(avg_g)), 6),
-                    "max": round(float(np.max(avg_g)), 6),
-                    "trace": round(float(np.trace(avg_g)), 6),
-                    "shape": list(avg_g.shape),
-                }
-            traces = [layers_info[n]["trace"] for n in style_layers]
-            total_trace = sum(abs(t) for t in traces) + 1e-10
-            vgg_style = {
-                "model": "vgg19-gram-gpu",
-                "layers": layers_info,
-                "styleFingerprint": [round(abs(t) / total_trace, 4) for t in traces],
-            }
-    except Exception as e:
-        print(f"[color] VGG-19 Gram failed: {e}", flush=True)
+    # ── Reinhard LAB statistics (lightweight, no GPU model needed) ────
+    reinhard_stats = reinhard_lab_stats(frames)
 
     # Look classification
     if brightness < 0.35 and contrast > 0.5:
@@ -831,7 +810,7 @@ def analyze_color(video_path, n_frames=10):
             "saturation": eq_saturation,
             "gamma": eq_gamma,
         },
-        "labStats": {
+        "labStats": reinhard_stats if reinhard_stats else {
             "mean_L": round(float(np.mean(all_lab_l)), 2),
             "mean_a": round(float(np.mean(all_lab_a)), 2),
             "mean_b": round(float(np.mean(all_lab_b)), 2),
@@ -840,10 +819,10 @@ def analyze_color(video_path, n_frames=10):
             "std_b": round(float(np.std(all_lab_b)), 2),
         },
         "temporalConsistency": round(1.0 - min(1.0, float(np.std(all_b)) + float(np.std(all_s))), 4),
-        "vggStyleFeatures": vgg_style,
+        "reinhardLabStats": reinhard_stats,
         "frameCount": len(frames),
         "duration": round(duration, 3),
-        "mlModel": "vgg19-gram+kmeans-gpu" if vgg_style else "kmeans-lab-gpu",
+        "mlModel": "reinhard-lab+kmeans-gpu",
         "processingMs": round((time.time() - t0) * 1000),
     }
 
@@ -860,7 +839,7 @@ def _empty_color():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  ANALYSIS MODULE 5: Beat Detection (librosa — CPU, fast)
+#  ANALYSIS MODULE 5: Beat Detection (madmom RNN+DBN primary, librosa fallback)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def analyze_beats(video_path):
@@ -877,6 +856,44 @@ def analyze_beats(video_path):
         if duration < 0.5:
             return _empty_beats(duration)
 
+        # ── Tier 1: madmom RNN + DBN beat tracking (high accuracy) ────
+        #    madmom uses 3× bidirectional LSTMs trained on 100+ annotated
+        #    beat tracking datasets → beat activation function → DBN for
+        #    probabilistic beat grid inference (fps=100 → 10ms resolution).
+        #    This gives significantly better rhythmic accuracy than librosa.
+        beat_times = None
+        bpm = 0.0
+        madmom_used = False
+        model_name = "librosa-spectral-flux-dbn-gpu"
+
+        try:
+            import madmom  # type: ignore[reportMissingImports]
+            print("[beats] Trying madmom RNN+DBN (high-accuracy)...", flush=True)
+            sig = madmom.audio.signal.Signal(wav_path, sample_rate=44100, num_channels=1)
+            beat_proc = madmom.features.beats.RNNBeatProcessor()(sig)
+            dbn_proc = madmom.features.beats.DBNBeatTrackingProcessor(fps=100)
+            beat_times_mm = dbn_proc(beat_proc)
+            if len(beat_times_mm) >= 3:
+                beat_times = beat_times_mm
+                madmom_used = True
+                model_name = "madmom-rnn-dbn-gpu"
+                # Tempo estimation via madmom CombFilter
+                try:
+                    tempo_proc = madmom.features.tempo.TempoEstimationProcessor(fps=100)
+                    tempi = tempo_proc(beat_proc)
+                    if len(tempi) > 0:
+                        bpm = float(tempi[0][0])
+                except Exception:
+                    pass
+                print(f"[beats] ✅ madmom: {len(beat_times)} beats, BPM={bpm:.1f}", flush=True)
+            else:
+                print(f"[beats] madmom found only {len(beat_times_mm)} beats — falling back to librosa", flush=True)
+        except ImportError:
+            print("[beats] madmom not installed — using librosa", flush=True)
+        except Exception as e:
+            print(f"[beats] madmom failed: {e} — using librosa", flush=True)
+
+        # ── Tier 2: librosa spectral flux + DBN (fallback) ────────────
         onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=512, aggregate=np.median)
         onset_env_bass = librosa.onset.onset_strength(y=y, sr=sr, hop_length=512,
                                                        feature=librosa.feature.melspectrogram,
@@ -888,15 +905,24 @@ def analyze_beats(video_path):
                                                        feature=librosa.feature.melspectrogram,
                                                        fmin=4000, fmax=8000, n_mels=32)
 
-        tempo, beat_frames = librosa.beat.beat_track(
-            onset_envelope=onset_env, sr=sr, hop_length=512, start_bpm=120, tightness=100
-        )
-        beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=512)
+        if beat_times is None:
+            # Librosa beat tracker as fallback
+            tempo, beat_frames = librosa.beat.beat_track(
+                onset_envelope=onset_env, sr=sr, hop_length=512, start_bpm=120, tightness=100
+            )
+            beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=512)
+            if hasattr(tempo, "__len__"):
+                bpm = float(tempo[0]) if len(tempo) > 0 else 0.0
+            else:
+                bpm = float(tempo)
+
+        # Onset detection (always via librosa for multi-band analysis)
         onset_frames = librosa.onset.onset_detect(
             onset_envelope=onset_env, sr=sr, hop_length=512, backtrack=True, delta=0.07, wait=3
         )
         onset_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=512)
 
+        # Merge beat times + onset times, de-duplicate
         all_times = np.unique(np.concatenate([beat_times, onset_times]))
         all_times = np.sort(all_times)
         all_times = all_times[all_times < duration - 0.05]
@@ -907,6 +933,7 @@ def analyze_beats(video_path):
                     deduped.append(t)
             all_times = np.array(deduped)
 
+        # Build beat events with per-beat intensity and band classification
         onset_env_norm = onset_env / (np.max(onset_env) + 1e-8)
         beat_events = []
         for t in all_times:
@@ -932,16 +959,14 @@ def analyze_beats(video_path):
                 "band": band,
             })
 
-        if hasattr(tempo, "__len__"):
-            bpm = float(tempo[0]) if len(tempo) > 0 else 0.0
-        else:
-            bpm = float(tempo)
+        # Normalize BPM to 60-180 range
         while bpm > 180:
             bpm /= 2
         while 0 < bpm < 60:
             bpm *= 2
         bpm = round(max(60, min(180, bpm)), 1)
 
+        # BPM confidence from inter-beat interval consistency
         confidence = 0.0
         if len(beat_times) >= 3:
             ibis = np.diff(beat_times)
@@ -974,7 +999,7 @@ def analyze_beats(video_path):
             "beatDensity": round(len(beat_events) / max(duration, 0.1), 4),
             "timeSignatureGuess": "4/4",
             "processingMs": round((time.time() - t0) * 1000),
-            "mlModel": "librosa-spectral-flux-dbn-gpu",
+            "mlModel": model_name,
         }
     finally:
         try:
@@ -997,8 +1022,8 @@ def _empty_beats(duration=0):
 #  FASTAPI SERVER
 # ═════════════════════════════════════════════════════════════════════════════
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse, Response
 import uvicorn
 
 app = FastAPI(title="Colab GPU Video Analysis Server", version="1.0.0")
@@ -1049,13 +1074,12 @@ async def process_video(file: UploadFile = File(...)):
         errors = []
 
         # ── GPU memory strategy for T4 (16 GB VRAM) ──────────────────
-        # RAFT-Large + Depth-Anything-Base + VGG-19 cannot coexist.
-        # We unload each heavy model after its stage finishes so the
-        # next stage has headroom.
+        # RAFT-Large + Depth-Anything-Base are heavy; unload each after
+        # its stage finishes so the next stage has headroom.
+        # Color analysis now uses Reinhard LAB (no GPU model needed).
         STAGE_CLEANUP = {
             "motion": "raft",
             "depth": "depth",
-            "color": "vgg19",
         }
 
         for name, fn, args in [
@@ -1179,13 +1203,294 @@ async def api_beats(file: UploadFile = File(...)):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+#  FFmpeg GPU RENDER — Offloaded from the Next.js server
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.post("/render")
+async def render_video(
+    target: UploadFile = File(...),
+    reference: UploadFile = File(None),
+    hald_clut: UploadFile = File(None),
+    filter_graph: str = Form(...),
+    temporal_color_cmd: str = Form(""),
+    beat_pulse_cmd: str = Form(""),
+    blur_cmd: str = Form(""),
+    transition_cmd: str = Form(""),
+    impact_cmd: str = Form(""),
+    codec_flags: str = Form("-c:v libx264 -profile:v high -pix_fmt yuv420p -preset slow -crf 18 -threads 0"),
+    bitrate_flags: str = Form("-b:v 5M -minrate 3M -maxrate 8M -bufsize 16M"),
+    audio_flags: str = Form(""),
+    mapping_flags: str = Form('-map "[vout]"'),
+    duration: float = Form(10.0),
+    loop_audio: bool = Form(False),
+):
+    """
+    GPU-accelerated FFmpeg render endpoint.
+
+    Receives the pre-built filter_complex graph and video files from the
+    Next.js server, runs FFmpeg on the Colab machine (with optional NVENC
+    GPU encoding), and streams the rendered MP4 back.
+
+    This keeps all filter-graph construction logic on the TypeScript side
+    while offloading the heavy CPU/GPU encode work to Colab's hardware.
+    """
+    tmp_dir = tempfile.mkdtemp(prefix="colab_render_")
+    try:
+        t0 = time.time()
+
+        # ── Save uploaded files ────────────────────────────────────────
+        target_path = os.path.join(tmp_dir, "target.mp4")
+        with open(target_path, "wb") as f:
+            f.write(await target.read())
+
+        ref_path = None
+        if reference is not None:
+            content = await reference.read()
+            if len(content) > 0:
+                ref_path = os.path.join(tmp_dir, "reference.mp4")
+                with open(ref_path, "wb") as f:
+                    f.write(content)
+
+        hald_path = None
+        if hald_clut is not None:
+            content = await hald_clut.read()
+            if len(content) > 0:
+                hald_path = os.path.join(tmp_dir, "hald_clut.png")
+                with open(hald_path, "wb") as f:
+                    f.write(content)
+
+        # ── Write temporal color sendcmd file if provided ──────────────
+        sendcmd_path = None
+        if temporal_color_cmd.strip():
+            sendcmd_path = os.path.join(tmp_dir, "temporal_color.cmd")
+            with open(sendcmd_path, "w", encoding="utf-8") as f:
+                f.write(temporal_color_cmd)
+
+        # ── Write beat pulse sendcmd file if provided ──────────────────
+        beat_pulse_path = None
+        if beat_pulse_cmd.strip():
+            beat_pulse_path = os.path.join(tmp_dir, "beat_pulse.cmd")
+            with open(beat_pulse_path, "w", encoding="utf-8") as f:
+                f.write(beat_pulse_cmd)
+
+        # ── Write blur replication sendcmd file if provided ────────────
+        blur_cmd_path = None
+        if blur_cmd.strip():
+            blur_cmd_path = os.path.join(tmp_dir, "ref_blur.cmd")
+            with open(blur_cmd_path, "w", encoding="utf-8") as f:
+                f.write(blur_cmd)
+
+        # ── Write transition replication sendcmd file if provided ──────
+        transition_cmd_path = None
+        if transition_cmd.strip():
+            transition_cmd_path = os.path.join(tmp_dir, "ref_transition.cmd")
+            with open(transition_cmd_path, "w", encoding="utf-8") as f:
+                f.write(transition_cmd)
+
+        # ── Write beat-triggered jitter sendcmd file if provided ───────
+        impact_cmd_path = None
+        if impact_cmd.strip():
+            impact_cmd_path = os.path.join(tmp_dir, "beat_impact.cmd")
+            with open(impact_cmd_path, "w", encoding="utf-8") as f:
+                f.write(impact_cmd)
+
+        output_path = os.path.join(tmp_dir, "output.mp4")
+
+        # ── Rewrite filter_graph paths ─────────────────────────────────
+        #    The client's filter_graph references placeholder paths.
+        #    Replace them with real Colab-side temp paths.
+        #    Use forward slashes and escape colons for FFmpeg.
+        graph = filter_graph
+
+        if sendcmd_path:
+            safe_cmd = sendcmd_path.replace("\\", "/").replace(":", "\\:")
+            graph = graph.replace("__SENDCMD_PATH__", safe_cmd)
+
+        if beat_pulse_path:
+            safe_bp = beat_pulse_path.replace("\\", "/").replace(":", "\\:")
+            graph = graph.replace("__BEATPULSE_PATH__", safe_bp)
+
+        if blur_cmd_path:
+            safe_blur = blur_cmd_path.replace("\\", "/").replace(":", "\\:")
+            graph = graph.replace("__BLURCMD_PATH__", safe_blur)
+
+        if transition_cmd_path:
+            safe_trans = transition_cmd_path.replace("\\", "/").replace(":", "\\:")
+            graph = graph.replace("__TRANSCMD_PATH__", safe_trans)
+
+        if impact_cmd_path:
+            safe_impact = impact_cmd_path.replace("\\", "/").replace(":", "\\:")
+            graph = graph.replace("__IMPACTCMD_PATH__", safe_impact)
+
+        # ── Build inputs ───────────────────────────────────────────────
+        inputs = []
+        # Input indices must match what the client's filter_graph expects:
+        #   With ref audio:  0=reference, 1=target, 2=hald (optional)
+        #   Without ref:     0=target, 1=hald (optional)
+        has_ref = ref_path is not None
+
+        if has_ref:
+            if loop_audio:
+                inputs.extend(["-stream_loop", "-1", "-i", ref_path])
+            else:
+                inputs.extend(["-i", ref_path])
+
+        inputs.extend(["-i", target_path])
+
+        if hald_path:
+            inputs.extend(["-i", hald_path])
+
+        # ── Write filter graph to file (avoid CLI length limits) ───────
+        filter_file = os.path.join(tmp_dir, "filter_complex.txt")
+        with open(filter_file, "w", encoding="utf-8") as f:
+            f.write(graph)
+
+        # Verify the filter graph file was written successfully
+        if not os.path.exists(filter_file) or os.path.getsize(filter_file) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="filter_complex.txt is missing or empty — cannot render",
+            )
+        print(f"[render] filter_complex.txt written: {os.path.getsize(filter_file)} bytes", flush=True)
+
+        # ── Check for NVENC GPU encoding ──────────────────────────────
+        #    If an NVIDIA GPU is available, swap libx264 → h264_nvenc
+        #    for 5-10× faster encoding.  Keep libx264 as fallback.
+        actual_codec_flags = codec_flags
+        if torch.cuda.is_available():
+            try:
+                # Probe whether h264_nvenc is available in this FFmpeg build
+                probe = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-encoders"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if "h264_nvenc" in probe.stdout:
+                    actual_codec_flags = codec_flags.replace(
+                        "-c:v libx264", "-c:v h264_nvenc"
+                    ).replace(
+                        "-preset slow", "-preset p4"
+                    ).replace(
+                        "-crf 18", "-cq 18 -rc vbr -bf 0"
+                    )
+                    # Ensure -bf 0 is present even if codec_flags
+                    # already had nvenc but missed it
+                    if "-bf 0" not in actual_codec_flags:
+                        actual_codec_flags += " -bf 0"
+                    print("[render] Using h264_nvenc GPU encoding (B-frames disabled for browser compat)", flush=True)
+                else:
+                    print("[render] h264_nvenc not available, using libx264", flush=True)
+            except Exception:
+                print("[render] GPU encoder probe failed, using libx264", flush=True)
+
+        # ── Read filter graph content for -filter_complex ──────────────
+        #    Use standard -filter_complex with the graph as an inline
+        #    string argument.  This is compatible with ALL FFmpeg versions
+        #    (the newer -/filter_complex file-read syntax requires 7.x+).
+        with open(filter_file, "r", encoding="utf-8") as f:
+            filter_graph_content = f.read()
+
+        # ── Build FFmpeg command ───────────────────────────────────────
+        cmd = [
+            "ffmpeg", "-y",
+            "-analyzeduration", "100M", "-probesize", "100M",
+            *inputs,
+            "-filter_complex", filter_graph_content,
+        ]
+
+        # Parse mapping, codec, audio, and bitrate flags
+        import shlex
+        cmd.extend(shlex.split(mapping_flags))
+        cmd.extend(shlex.split(actual_codec_flags))
+        if audio_flags.strip():
+            cmd.extend(shlex.split(audio_flags))
+        cmd.extend(["-movflags", "+faststart"])
+        cmd.extend(shlex.split(bitrate_flags))
+        cmd.extend(["-t", f"{duration:.3f}"])
+        cmd.append(output_path)
+
+        print(f"[render] FFmpeg command: {' '.join(cmd)}", flush=True)
+
+        # ── Execute FFmpeg ─────────────────────────────────────────────
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minute max
+        )
+
+        if proc.returncode != 0:
+            print(f"[render] FFmpeg FAILED:\n{proc.stderr[-2000:]}", flush=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"FFmpeg render failed (exit {proc.returncode}):\n{proc.stderr[-2000:]}",
+            )
+
+        if not os.path.exists(output_path):
+            raise HTTPException(status_code=500, detail="FFmpeg produced no output file")
+
+        output_size = os.path.getsize(output_path)
+        elapsed = time.time() - t0
+        print(
+            f"[render] ✅ Render complete: {output_size/1024:.0f}KB in {elapsed:.1f}s"
+            + (f" (GPU: {torch.cuda.get_device_name(0)})" if torch.cuda.is_available() else ""),
+            flush=True,
+        )
+
+        # ── Stream rendered video back ─────────────────────────────────
+        video_bytes = open(output_path, "rb").read()
+        return Response(
+            content=video_bytes,
+            media_type="video/mp4",
+            headers={
+                "X-Render-Ms": str(round(elapsed * 1000)),
+                "X-Output-Size": str(output_size),
+            },
+        )
+
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="FFmpeg render timed out (>10 min)")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 #  NGROK TUNNEL + STARTUP
 # ═════════════════════════════════════════════════════════════════════════════
 
 def start_server():
     PORT = 8000
 
-    # ── Ngrok tunnel ─────────────────────────────────────────────────
+    # ── Pre-load ALL models BEFORE exposing the server ───────────────
+    #    Download & load every model onto GPU first so the ngrok URL
+    #    is only published once the server is fully warm.  This prevents
+    #    the 600s timeout when the first request triggers a large
+    #    model download (RAFT / Depth-Anything).
+    #    VGG-19 has been removed — colour analysis now uses the
+    #    lightweight Reinhard LAB method (OpenCV only, no weights).
+    print("[colab-gpu] Pre-loading models onto GPU (this may take a few minutes on first run)...", flush=True)
+    try:
+        get_raft()
+    except Exception as e:
+        print(f"[colab-gpu] ⚠ RAFT pre-load failed: {e}", flush=True)
+    try:
+        get_depth_model()
+    except Exception as e:
+        print(f"[colab-gpu] ⚠ Depth model pre-load failed: {e}", flush=True)
+    try:
+        get_transnetv2()
+    except Exception as e:
+        print(f"[colab-gpu] ⚠ TransNetV2 pre-load failed: {e}", flush=True)
+    print("[colab-gpu] ✅ All models loaded. Opening tunnel...\n", flush=True)
+
+    # ── Ngrok tunnel (opened AFTER models are warm) ──────────────────
     try:
         from pyngrok import ngrok
 
@@ -1219,13 +1524,7 @@ def start_server():
         print(f"\n[colab-gpu] Ngrok tunnel failed: {e}")
         print(f"  Running locally on port {PORT}\n")
 
-    # ── Pre-load models ──────────────────────────────────────────────
-    print("[colab-gpu] Pre-loading models onto GPU...", flush=True)
-    get_raft()
-    get_depth_model()
-    get_vgg19()
-    get_transnetv2()
-    print("[colab-gpu] All models loaded. Server starting...\n", flush=True)
+    print("[colab-gpu] Server starting...\n", flush=True)
 
     uvicorn.run(app, host="0.0.0.0", port=PORT)
 

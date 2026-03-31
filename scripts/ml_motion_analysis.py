@@ -193,7 +193,7 @@ def analyze_motion(video_path, fps=30):
         for i in batch:
             t = i*dt
             pi = max(0, i-step)
-            flow = (raft_flow(frames[pi], frames[i]) if use_raft else None) or farneback_flow(grays[pi], grays[i])
+            flow = raft_flow(frames[pi], frames[i]) if use_raft else farneback_flow(grays[pi], grays[i])
             mag = np.sqrt(flow[...,0]**2 + flow[...,1]**2)
             ang = np.arctan2(flow[...,1], flow[...,0])
             mm, xm, dm = float(np.mean(mag)), float(np.max(mag)), float(np.median(mag))

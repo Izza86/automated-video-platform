@@ -4,12 +4,16 @@ import Link from "next/link";
 import { ArrowLeft, Activity, User, Video, Download, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-export default async function ActivityPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function ActivityPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = auth;
 
   const activities = [
     { user: "John Doe", action: "Uploaded video", time: "2 minutes ago", type: "upload", icon: Video },

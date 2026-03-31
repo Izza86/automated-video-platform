@@ -36,7 +36,7 @@ import {
   writeTempFile,
   mean,
 } from "../utils/ffmpeg";
-import { runMLScript } from "../utils/ml-runner";
+import { runMLScript, runColabMLScriptWithRetry } from "../utils/ml-runner";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -126,12 +126,25 @@ export async function analyzeAudio(
     // Replaces basic energy detection with RNN-based beat tracker.
     // Ensures every cut is locked to the music's transients for 100%
     // rhythmic accuracy.
-    const mlResult = await runMLScript<MLBeatResult>(
-      "ml_beat_detection.py",
-      videoPath,
-      [],
-      600_000, // 600s timeout — RNN/LSTM beat tracking
-    );
+    //
+    // Strategy:
+    //   1. Try Colab GPU with retry (3 attempts, 10-min timeout each)
+    //      — Colab's madmom RNN+DBN gives highest accuracy
+    //   2. Fall back to local Python if Colab is unavailable
+    //   3. Fall back to FFmpeg spectral flux if Python fails
+    const mlResult =
+      (await runColabMLScriptWithRetry<MLBeatResult>(
+        "ml_beat_detection.py",
+        videoPath,
+        600_000,  // 10 min per attempt
+        3,        // 3 retry attempts
+      )) ??
+      (await runMLScript<MLBeatResult>(
+        "ml_beat_detection.py",
+        videoPath,
+        [],
+        600_000, // 10 min timeout for local Python
+      ));
 
     if (mlResult && !mlResult.error && mlResult.hasAudio && mlResult.beatEvents && mlResult.beatEvents.length > 0) {
       console.log(
@@ -187,6 +200,18 @@ export async function analyzeAudio(
       };
     }
 
+    // ── STRICT MODE: No FFmpeg/librosa fallback ───────────────────────
+    //    High-accuracy ML beat data (madmom RNN+DBN via Colab or local
+    //    Python) is REQUIRED for frame-accurate beat sync.  Return empty
+    //    result so the caller retries with Colab GPU active.
+    console.error(
+      "[audio] ❌ ML beat detection FAILED after all retries " +
+      "(Colab 3× + local Python). FFmpeg/librosa fallback is DISABLED. " +
+      "Ensure the Colab GPU notebook is running and COLAB_GPU_URL is set.",
+    );
+    return emptyResult(t0);
+
+    // ---------- Legacy FFmpeg pipeline below (unreachable — strict mode) ----------
     console.log("[audio] ML beat detection unavailable or failed, falling back to FFmpeg pipeline");
 
     const ffmpeg = await resolveFfmpeg();

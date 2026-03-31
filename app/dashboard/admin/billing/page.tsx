@@ -6,6 +6,7 @@ import {
 } from "@/server/admin-subscriptions";
 import { checkIsAdmin } from "@/server/permissions";
 import { redirect } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import {
   Card,
   CardContent,
@@ -30,6 +31,8 @@ import {
   CalendarDays 
 } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminBillingPage() {
   const isAdmin = await checkIsAdmin();
   
@@ -37,12 +40,20 @@ export default async function AdminBillingPage() {
     redirect("/dashboard");
   }
 
-  const [subscriptions, stats, recentPayments, growth] = await Promise.all([
-    getAllSubscriptions(),
-    getSubscriptionStats(),
-    getRecentPayments(10),
-    getSubscriptionGrowth(),
-  ]);
+  let subscriptions, stats, recentPayments, growth;
+  try {
+    [subscriptions, stats, recentPayments, growth] = await Promise.all([
+      getAllSubscriptions(),
+      getSubscriptionStats(),
+      getRecentPayments(10),
+      getSubscriptionGrowth(),
+    ]);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    // DB unreachable during build prerendering — redirect instead of crashing
+    console.error("[AdminBillingPage] data fetch failed:", error);
+    redirect("/dashboard");
+  }
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {

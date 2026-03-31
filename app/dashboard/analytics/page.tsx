@@ -6,15 +6,18 @@ import { ArrowLeft, TrendingUp, Clock, Video, Activity, BarChart3, Folder } from
 import { Badge } from "@/components/ui/badge";
 
 export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export default async function AnalyticsPage() {
-  const { currentUser } = await getCurrentUser();
+  const auth = await getCurrentUser();
 
-  if (!currentUser) {
+  if (!auth || !auth.currentUser) {
     redirect("/login");
   }
+
+  const { currentUser } = auth;
 
   const isAdmin = currentUser.role === "admin";
   const analytics = await getAnalyticsData(isAdmin ? undefined : currentUser.id);

@@ -19,14 +19,14 @@ import { createProject } from "@/server/projects";
 // FFmpeg is lazy-loaded only when the user starts processing
 type FFmpegInstance = import("@ffmpeg/ffmpeg").FFmpeg;
 
-// Demo video URLs for different template categories
-const DEMO_VIDEOS: Record<string, string> = {
-  "Intros & Outros": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-  "Transitions": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-  "Lower Thirds & Text": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
-  "Social Media": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
-  "Effects & Filters": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
-  "Promo & Ads": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+// CapCut template URLs for different template categories
+const CAPCUT_TEMPLATES: Record<string, string> = {
+  "Intros & Outros": "https://www.capcut.com/templates/intro-outro-video-7159609137982734594",
+  "Transitions": "https://www.capcut.com/templates/transition-video-7152882498678954242",
+  "Lower Thirds & Text": "https://www.capcut.com/templates/text-animation-video-7148498479355177218",
+  "Social Media": "https://www.capcut.com/templates/social-media-video-7159609137982734594",
+  "Effects & Filters": "https://www.capcut.com/templates/effects-video-7159609137982734594",
+  "Promo & Ads": "https://www.capcut.com/templates/promo-video-7159609137982734594",
 };
 
 const CATEGORIES = ["All", "Intros & Outros", "Transitions", "Lower Thirds & Text", "Social Media", "Effects & Filters", "Promo & Ads"] as const;
@@ -718,18 +718,25 @@ export default function TemplatesClient() {
                     <Play className="w-4 h-4" />
                     Template Preview - Click to Play
                   </h4>
-                  <div className="relative aspect-video rounded-lg overflow-hidden border border-purple-500/30 bg-black">
-                    {/* Video element with controls for template preview */}
-                    <video
-                      key={selectedTemplate?.id}
-                      poster={selectedTemplate?.thumbnail}
-                      controls
+                  <div className="relative aspect-video rounded-lg overflow-hidden border border-purple-500/30 bg-black group/preview">
+                    {/* Thumbnail preview with CapCut link */}
+                    <img
+                      src={selectedTemplate?.thumbnail}
+                      alt={selectedTemplate?.name}
                       className="w-full h-full object-cover"
+                    />
+                    {/* CapCut template link overlay */}
+                    <a
+                      href={CAPCUT_TEMPLATES[selectedTemplate?.category || "Promo & Ads"]}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-300"
                     >
-                      {/* Using category-specific demo videos */}
-                      <source src={DEMO_VIDEOS[selectedTemplate?.category || "Promo & Ads"]} type="video/mp4" />
-                      Your browser does not support the video tag.
-                    </video>
+                      <div className="bg-purple-600 hover:bg-purple-500 text-white rounded-full p-3 mb-2 transition-colors">
+                        <Play className="w-6 h-6" />
+                      </div>
+                      <span className="text-white text-sm font-medium">View on CapCut</span>
+                    </a>
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-transparent to-transparent p-3 pointer-events-none">
                       <div className="space-y-1">
                         <p className="text-white font-semibold text-sm">{selectedTemplate?.name}</p>

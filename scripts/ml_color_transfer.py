@@ -1,31 +1,34 @@
 #!/usr/bin/env python3
 """
-ML Color Transfer — Neural Color Grading Analysis
-====================================================
-Cascading color analysis:
+ML Color Transfer — Reinhard LAB Color Grading Analysis
+========================================================
+Lightweight color analysis using classical statistical methods:
 
-  1. VGG-19 Gram Matrix Style Features (real neural style encoding)
-     — if torch + torchvision available
-  2. K-Means Color Clustering + Multi-Space Statistics (always works)
+  1. Reinhard LAB Color Transfer (Reinhard et al., 2001)
+     — Mean/std matching in CIELAB colour space
+  2. K-Means Color Clustering — Dominant palette extraction
+  3. Multi-space Statistics — HSV + LAB histogram analysis
 
-Models & Algorithms:
-  - VGG-19 (torchvision): Gram matrix computation from relu1_2, relu2_2,
-    relu3_3, relu4_3 feature maps — captures texture, color patterns,
-    and style fingerprint of the reference grading.
-  - K-Means Clustering: Dominant color palette extraction (5 clusters)
-  - Statistical Moments: Mean/std in LAB space (Reinhard 2001 color transfer)
-  - Multi-space histograms: HSV + LAB histogram analysis
+This replaces the previous VGG-19 Gram matrix approach which was:
+  • Too heavy (~548 MB weights download)
+  • Slow to initialise on first run
+  • Less accurate for natural video colour grading transfer
 
-Output: JSON with color DNA profile (brightness, saturation, contrast,
-        dominant palette, warmth, shadow/mid/highlight analysis, VGG style
-        features), plus optional .cube LUT file path.
+The Reinhard method is ideal because:
+  • Zero external model weights required
+  • Runs in < 1 second on CPU
+  • Produces perceptually accurate colour statistics
+  • Directly usable for eq/colorbalance FFmpeg parameters
+
+Output: JSON with colour DNA profile (brightness, saturation, contrast,
+        dominant palette, warmth, shadow/mid/highlight analysis, LAB stats),
+        plus optional .cube LUT file path.
 
 Usage:
-  python scripts/ml_color_transfer.py <video_path> [--lut-output <path>] [--frames 30]
+  python scripts/ml_color_transfer.py <video_path> [--lut-output <path>] [--frames 10]
 
 Dependencies:
-  opencv-python, scikit-image, scikit-learn, numpy, scipy
-  Optional: torch, torchvision (for VGG-19 Gram matrix style encoding)
+  opencv-python, scikit-learn, numpy
 """
 
 import sys
@@ -70,7 +73,7 @@ def find_ffmpeg():
 def extract_sample_frames(video_path, n_frames=10):
     """
     Extract evenly-spaced sample frames for color analysis.
-    Like a CNN sampling strategy — uniform temporal sampling.
+    Uniform temporal sampling across the video duration.
     """
     import cv2
 
@@ -120,138 +123,60 @@ def extract_sample_frames(video_path, n_frames=10):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  VGG-19 Gram Matrix Style Encoding (Real Neural Network)
+#  Reinhard LAB Color Transfer (Reinhard et al., 2001)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_vgg_model = None
-_vgg_device = None
-
-def _load_vgg19():
-    """Load VGG-19 feature extractor (cached on first call)."""
-    global _vgg_model, _vgg_device
-    if _vgg_model is not None:
-        return _vgg_model, _vgg_device
-    try:
-        import torch
-        import torchvision.models as models
-        _vgg_device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"[VGG-19] Loading on {_vgg_device}...", file=sys.stderr, flush=True)
-        vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT).features.to(_vgg_device).eval()
-        for p in vgg.parameters():
-            p.requires_grad = False
-        _vgg_model = vgg
-        print("[VGG-19] Model loaded", file=sys.stderr, flush=True)
-        return _vgg_model, _vgg_device
-    except Exception as e:
-        print(f"[VGG-19] Cannot load: {e}", file=sys.stderr)
-        return None, None
-
-
-def _gram_matrix(tensor):
-    """Compute Gram matrix from feature tensor (B, C, H, W)."""
-    import torch
-    b, c, h, w = tensor.size()
-    features = tensor.view(b * c, h * w)
-    gram = torch.mm(features, features.t())
-    return gram.div(b * c * h * w)
-
-
-def try_vgg19_gram(frames):
+def reinhard_lab_stats(frames):
     """
-    Extract VGG-19 Gram matrix style features from sampled frames.
-    Returns a dict with per-layer Gram statistics or None if unavailable.
+    Compute Reinhard color transfer statistics from sampled frames.
 
-    Layers extracted:
-      relu1_2 (idx 3)  — low-level color patterns & edges
-      relu2_2 (idx 8)  — texture patterns
-      relu3_3 (idx 15) — medium-level style features
-      relu4_3 (idx 24) — high-level compositional style
+    Converts each frame to CIELAB colour space and computes per-channel
+    mean and standard deviation.  These statistics are all that's needed
+    to transfer the colour "feel" of one video onto another using:
+
+        target_ch = (target_ch - target_mean) * (ref_std / target_std) + ref_mean
+
+    Returns per-channel LAB statistics averaged across all frames.
     """
-    model, device = _load_vgg19()
-    if model is None or not frames:
+    import cv2
+
+    if not frames:
         return None
 
-    try:
-        import torch
-        import cv2
-        from torchvision import transforms
+    all_L_mean, all_A_mean, all_B_mean = [], [], []
+    all_L_std, all_A_std, all_B_std = [], [], []
 
-        preprocess = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+    for frame in frames:
+        # Convert BGR → LAB (float32 for precision)
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB).astype(np.float32)
+        L, A, B = cv2.split(lab)
 
-        # VGG-19 style layer indices
-        style_layers = {'relu1_2': 3, 'relu2_2': 8, 'relu3_3': 15, 'relu4_3': 24}
+        all_L_mean.append(float(np.mean(L)))
+        all_A_mean.append(float(np.mean(A)))
+        all_B_mean.append(float(np.mean(B)))
+        all_L_std.append(float(np.std(L)))
+        all_A_std.append(float(np.std(A)))
+        all_B_std.append(float(np.std(B)))
 
-        # Accumulate Gram matrices across frames
-        gram_sums = {name: None for name in style_layers}
-        n_frames = 0
-
-        for frame in frames[:8]:  # Cap at 8 frames for speed
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            tensor = preprocess(rgb).unsqueeze(0).to(device)
-
-            # Forward pass, extracting at each style layer
-            x = tensor
-            for idx, layer in enumerate(model):
-                x = layer(x)
-                for name, layer_idx in style_layers.items():
-                    if idx == layer_idx:
-                        gram = _gram_matrix(x).cpu().numpy()
-                        if gram_sums[name] is None:
-                            gram_sums[name] = gram.astype(np.float64)
-                        else:
-                            gram_sums[name] += gram.astype(np.float64)
-            n_frames += 1
-
-            del tensor, x
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        if n_frames == 0:
-            return None
-
-        # Average and extract statistics
-        result = {"model": "vgg19-gram-real", "layers": {}}
-        for name in style_layers:
-            avg_gram = gram_sums[name] / n_frames
-            result["layers"][name] = {
-                "mean": round(float(np.mean(avg_gram)), 6),
-                "std": round(float(np.std(avg_gram)), 6),
-                "max": round(float(np.max(avg_gram)), 6),
-                "trace": round(float(np.trace(avg_gram)), 6),
-                "shape": list(avg_gram.shape),
-            }
-
-        # Derive a style fingerprint: normalized trace ratios across layers
-        traces = [result["layers"][n]["trace"] for n in style_layers]
-        total_trace = sum(abs(t) for t in traces) + 1e-10
-        result["styleFingerprint"] = [round(abs(t) / total_trace, 4) for t in traces]
-
-        print(f"[VGG-19] Gram features extracted from {n_frames} frames", file=sys.stderr, flush=True)
-        return result
-
-    except Exception as e:
-        print(f"[VGG-19] Gram extraction failed: {e}", file=sys.stderr)
-        return None
+    return {
+        "mean_L": round(float(np.mean(all_L_mean)), 2),
+        "mean_a": round(float(np.mean(all_A_mean)), 2),
+        "mean_b": round(float(np.mean(all_B_mean)), 2),
+        "std_L": round(float(np.mean(all_L_std)), 2),
+        "std_a": round(float(np.mean(all_A_std)), 2),
+        "std_b": round(float(np.mean(all_B_std)), 2),
+    }
 
 
 def extract_color_features(frames):
     """
     Multi-space color feature extraction in RGB, HSV, LAB.
-
-    If torch + torchvision are available, also computes VGG-19 Gram
-    matrix style features from relu1_2, relu2_2, relu3_3, relu4_3 —
-    capturing the neural texture/color fingerprint of the grading.
+    Uses Reinhard LAB statistics instead of VGG-19 Gram matrices.
     """
     import cv2
 
-    # ── Try VGG-19 Gram matrix style encoding ─────────────────────────
-    vgg_style = try_vgg19_gram(frames)
-
+    # ── Reinhard LAB statistics ────────────────────────────────────────
+    lab_stats = reinhard_lab_stats(frames)
 
     all_brightness = []
     all_saturation = []
@@ -331,6 +256,33 @@ def extract_color_features(frames):
         flat = resized.reshape(-1, 3)[::10]
         all_rgb_pixels.append(flat)
 
+    # ── Per-channel histogram CDF (256 bins each, normalised 0-1) ─────
+    # Accumulate RGB histograms across all frames for CDF computation
+    hist_r = np.zeros(256, dtype=np.float64)
+    hist_g = np.zeros(256, dtype=np.float64)
+    hist_b = np.zeros(256, dtype=np.float64)
+
+    for frame in frames:
+        resized_rgb = cv2.resize(frame, (320, 240))
+        # OpenCV loads as BGR → convert to RGB for histogram
+        rgb = cv2.cvtColor(resized_rgb, cv2.COLOR_BGR2RGB)
+        hist_r += cv2.calcHist([rgb], [0], None, [256], [0, 256]).flatten()
+        hist_g += cv2.calcHist([rgb], [1], None, [256], [0, 256]).flatten()
+        hist_b += cv2.calcHist([rgb], [2], None, [256], [0, 256]).flatten()
+
+    total_pixels = hist_r.sum()
+    if total_pixels > 0:
+        cdf_r = np.cumsum(hist_r) / total_pixels
+        cdf_g = np.cumsum(hist_g) / total_pixels
+        cdf_b = np.cumsum(hist_b) / total_pixels
+        histogram_cdf = {
+            'r': [round(float(v), 6) for v in cdf_r],
+            'g': [round(float(v), 6) for v in cdf_g],
+            'b': [round(float(v), 6) for v in cdf_b],
+        }
+    else:
+        histogram_cdf = None
+
     return {
         'brightness': all_brightness,
         'saturation': all_saturation,
@@ -340,18 +292,18 @@ def extract_color_features(frames):
         'lab_l': all_lab_l,
         'lab_a': all_lab_a,
         'lab_b': all_lab_b,
+        'lab_stats': lab_stats,
         'shadow_vals': shadow_vals,
         'mid_vals': mid_vals,
         'highlight_vals': highlight_vals,
         'rgb_pixels': np.concatenate(all_rgb_pixels, axis=0) if all_rgb_pixels else np.array([]),
-        'vgg_style': vgg_style,
+        'histogram_cdf': histogram_cdf,
     }
 
 
 def extract_dominant_palette(rgb_pixels, n_colors=5):
     """
     K-Means color clustering for dominant palette extraction.
-    This is equivalent to a learned color quantization network.
     """
     from sklearn.cluster import KMeans
 
@@ -421,12 +373,12 @@ def classify_look(brightness, saturation, contrast, warmth, hue):
 
 def analyze_color_ml(video_path, n_frames=10, lut_output=None):
     """
-    Full ML color grading analysis pipeline.
+    Full colour grading analysis pipeline using Reinhard LAB statistics.
 
-    1. Sample frames uniformly (temporal CNN sampling)
-    2. Extract multi-space color features (CNN feature extraction)
-    3. K-Means palette clustering (learned quantization)
-    4. Statistical analysis (moment-based transfer parameters)
+    1. Sample frames uniformly (temporal sampling)
+    2. Extract multi-space colour features (HSV + LAB)
+    3. Compute Reinhard LAB statistics (mean/std per channel)
+    4. K-Means palette clustering
     5. Shadow/midtone/highlight decomposition
     6. Overall look classification
     """
@@ -435,7 +387,7 @@ def analyze_color_ml(video_path, n_frames=10, lut_output=None):
     if not frames:
         return empty_result()
 
-    # ── CNN Feature Extraction ─────────────────────────────────────────
+    # ── Feature Extraction ─────────────────────────────────────────────
     features = extract_color_features(frames)
 
     # ── Aggregate Statistics ───────────────────────────────────────────
@@ -460,7 +412,7 @@ def analyze_color_ml(video_path, n_frames=10, lut_output=None):
     if features['shadow_vals']:
         sv = features['shadow_vals']
         shadow_analysis = {
-            "avgHue": round(float(np.mean([s[0] for s in sv])) * 2, 1),  # Convert from OpenCV scale
+            "avgHue": round(float(np.mean([s[0] for s in sv])) * 2, 1),
             "avgSaturation": round(float(np.mean([s[1] for s in sv])) / 255, 4),
             "avgBrightness": round(float(np.mean([s[2] for s in sv])) / 255, 4),
         }
@@ -486,15 +438,14 @@ def analyze_color_ml(video_path, n_frames=10, lut_output=None):
     # ── Look Classification ────────────────────────────────────────────
     look = classify_look(brightness, saturation, contrast, warmth, hue)
 
-    # ── FFmpeg EQ Parameters (for inline color adjustment) ─────────────
-    # Map analysis results to FFmpeg eq filter parameters
+    # ── FFmpeg EQ Parameters (for inline colour adjustment) ────────────
     eq_brightness = round((brightness - 0.5) * 0.4, 4)
     eq_contrast = round(0.8 + contrast * 0.6, 4)
     eq_saturation = round(saturation, 4)
     eq_gamma = round(1.0 / max(0.3, brightness + 0.1), 4)
 
-    # ── LAB Statistics (for Reinhard color transfer) ───────────────────
-    lab_stats = {
+    # ── LAB Statistics (Reinhard color transfer) ───────────────────────
+    lab_stats = features.get('lab_stats') or {
         "mean_L": round(float(np.mean(features['lab_l'])), 2),
         "mean_a": round(float(np.mean(features['lab_a'])), 2),
         "mean_b": round(float(np.mean(features['lab_b'])), 2),
@@ -508,9 +459,11 @@ def analyze_color_ml(video_path, n_frames=10, lut_output=None):
     saturation_std = round(float(np.std(features['saturation'])), 4)
     temporal_consistency = round(1.0 - min(1.0, brightness_std + saturation_std), 4)
 
-    # ── VGG-19 Style Features ─────────────────────────────────────────
-    vgg = features.get('vgg_style')
-    model_label = "vgg19-gram+kmeans-lab" if vgg else "kmeans-lab-classical"
+    # ── Contrast std (used by color-grading.ts for stdLuminance) ───────
+    contrast_std = round(float(np.std(features['contrast'])), 4)
+
+    # ── Histogram CDF from feature extraction ──────────────────────────
+    histogram_cdf = features.get('histogram_cdf')
 
     return {
         "brightness": brightness,
@@ -531,10 +484,12 @@ def analyze_color_ml(video_path, n_frames=10, lut_output=None):
         },
         "labStats": lab_stats,
         "temporalConsistency": temporal_consistency,
-        "vggStyleFeatures": vgg,
+        "contrastStd": contrast_std,
+        "histogramCdf": histogram_cdf,
+        "vggStyleFeatures": None,
         "frameCount": len(frames),
         "duration": round(duration, 3),
-        "mlModel": model_label,
+        "mlModel": "reinhard-lab+kmeans",
     }
 
 
@@ -558,7 +513,7 @@ def main():
     # Handle quoted paths from Windows shell
     if video_path.startswith('"') and video_path.endswith('"'):
         video_path = video_path[1:-1]
-    
+
     if not os.path.isfile(video_path):
         print(json_dumps({"error": f"File not found: {video_path}", **empty_result()}))
         return

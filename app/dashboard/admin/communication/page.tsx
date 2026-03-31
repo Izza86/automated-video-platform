@@ -4,12 +4,16 @@ import Link from "next/link";
 import { ArrowLeft, Mail, Send, Users, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default async function CommunicationPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function CommunicationPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = auth;
 
   const templates = [
     { title: "Welcome Email", description: "Send to new users", icon: Mail },

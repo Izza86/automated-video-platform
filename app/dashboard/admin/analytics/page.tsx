@@ -4,12 +4,16 @@ import Link from "next/link";
 import { ArrowLeft, BarChart3, TrendingUp, Users, Video, Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-export default async function AnalyticsPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function AnalyticsPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = auth;
 
   const stats = [
     { title: "Total Users", value: "1,234", change: "+12%", icon: Users, color: "from-blue-600 to-cyan-600" },

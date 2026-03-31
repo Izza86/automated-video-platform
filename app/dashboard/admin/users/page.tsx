@@ -6,12 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { UserActions } from "@/components/user-actions";
 import { AddUserDialog } from "@/components/add-user-dialog";
 
-export default async function UsersManagementPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function UsersManagementPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = auth;
 
   const { users } = await getAllUsers();
 

@@ -1,13 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { Play, Pause, Volume2, UploadCloud, Video, Sparkles } from "lucide-react";
-
-const FooterWave = dynamic(
-  () => import("@/components/footer-wave").then((m) => m.FooterWave),
-  { ssr: false, loading: () => <div className="w-full h-40 bg-gradient-to-r from-amber-50 to-yellow-50 animate-pulse" /> }
-);
+import { FooterWave } from "@/components/footer-wave";
 
 export default function LandingBelowFold() {
   return (

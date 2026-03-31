@@ -4,12 +4,16 @@ import { getCurrentUser } from "@/server/users";
 import { ArrowLeft } from "lucide-react";
 import { ChangePasswordForm } from "@/components/change-password-form";
 
-export default async function ChangePasswordPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser) {
+export default async function ChangePasswordPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser) {
     redirect("/login");
   }
+
+  const { currentUser } = auth;
 
   // Admins don't need this page
   if (currentUser.role === "admin") {

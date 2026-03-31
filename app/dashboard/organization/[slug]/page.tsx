@@ -3,6 +3,8 @@ import MembersTable from "@/components/members-table";
 import { getOrganizationBySlug } from "@/server/organizations";
 import { getUsers } from "@/server/users";
 
+export const dynamic = "force-dynamic";
+
 type Params = Promise<{ slug: string }>;
 
 export default async function OrganizationPage({ params }: { params: Params }) {

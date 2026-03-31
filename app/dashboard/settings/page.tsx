@@ -2,12 +2,16 @@ import { getCurrentUser } from "@/server/users";
 import { redirect } from "next/navigation";
 import SettingsClient from "./settings-client";
 
-export default async function SettingsPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser) {
+export default async function SettingsPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser) {
     redirect("/login");
   }
+
+  const { currentUser } = auth;
 
   return <SettingsClient currentUser={currentUser} />;
 }

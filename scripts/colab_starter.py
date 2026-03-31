@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║  COLAB GPU SERVER — Starter Script                                      ║
 # ║  Copy-paste each cell into a Google Colab notebook (Runtime → T4 GPU)   ║
@@ -28,12 +29,18 @@ print(f"   PyTorch: {torch.__version__}")
 print(f"   CUDA: {torch.version.cuda}")
 
 # Install required packages (torch & torchvision are pre-installed on Colab)
-os.system('pip install -q fastapi uvicorn pyngrok python-multipart '
+os.system('pip install -q fastapi uvicorn python-multipart '
           'opencv-python-headless numpy scikit-learn scikit-image scipy '
-          'scenedetect[opencv] librosa soundfile transformers timm pillow')
+          'scenedetect[opencv] librosa soundfile transformers timm pillow '
+          'madmom')
 
-# Try installing TransNetV2 (may fail — that's OK, PySceneDetect is the fallback)
-os.system('pip install -q transnetv2 2>/dev/null || echo "TransNetV2 not available, using PySceneDetect"')
+# pyngrok — needed for the public tunnel
+os.system('pip install -q pyngrok')
+
+# TransNetV2 — install from GitHub (not available on PyPI)
+# This is the 3D DDCNN shot boundary detector; PySceneDetect is the fallback.
+os.system('pip install -q git+https://github.com/soCzech/TransNetV2.git 2>/dev/null '
+          '|| echo "⚠️  TransNetV2 install failed — PySceneDetect will be used instead"')
 
 print("\n✅ All packages installed!")
 
@@ -106,11 +113,6 @@ from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
 _ = raft_large(weights=Raft_Large_Weights.DEFAULT)
 print("✅")
 
-print("  → VGG-19...", end=" ", flush=True)
-import torchvision.models as models
-_ = models.vgg19(weights=models.VGG19_Weights.DEFAULT)
-print("✅")
-
 print("  → Depth-Anything V2 Base...", end=" ", flush=True)
 try:
     from transformers import AutoImageProcessor, AutoModelForDepthEstimation
@@ -119,6 +121,31 @@ try:
     print("✅")
 except Exception as e:
     print(f"⚠️  {e} (will try MiDaS fallback)")
+
+print("  → TransNetV2...", end=" ", flush=True)
+try:
+    from transnetv2 import TransNetV2
+    _ = TransNetV2()
+    print("✅")
+except ImportError:
+    print("⚠️  Not installed — PySceneDetect will be used instead")
+except Exception as e:
+    print(f"⚠️  {e}")
+
+print("  → madmom RNN beat tracker...", end=" ", flush=True)
+try:
+    import madmom
+    # Force-load the RNN weights so first request doesn't stall
+    _ = madmom.features.beats.RNNBeatProcessor()
+    print("✅")
+except ImportError:
+    print("⚠️  Not installed — librosa will be used instead")
+except Exception as e:
+    print(f"⚠️  {e}")
+
+# NOTE: VGG-19 is no longer needed — colour analysis uses the
+# lightweight Reinhard LAB method (OpenCV only, no weights download).
+print("  → Reinhard LAB Color... ✅ (no download needed — uses OpenCV)")
 
 print("\n🚀 Starting server...")
 

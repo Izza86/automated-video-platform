@@ -8,7 +8,9 @@ import { getCurrentUser } from "./users";
 // Get all users (Admin only)
 export const getAllUsers = async () => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated.", users: [] };
+    const { currentUser } = authData;
     
     if (currentUser.role !== 'admin') {
       return {
@@ -47,7 +49,9 @@ export const getAllUsers = async () => {
 // Delete user (Admin only)
 export const deleteUser = async (userId: string) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
     
     if (currentUser.role !== 'admin') {
       return {
@@ -85,7 +89,9 @@ export const updateUserProfile = async (data: {
   profilePhoto?: string | null;
 }) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
 
     const updateData: any = {};
     if (data.name !== undefined) updateData.name = data.name;

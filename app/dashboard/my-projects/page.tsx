@@ -13,6 +13,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+/** Rewrite /outputs/ URLs to the API video route for production compatibility */
+function videoSrc(url: string | undefined | null): string {
+  if (!url) return '';
+  let u = url;
+  const idx = u.indexOf('/outputs/');
+  if (idx >= 0) {
+    const filename = u.slice(idx + '/outputs/'.length).split('?')[0];
+    u = `/api/video/${filename}`;
+  }
+  const sep = u.includes('?') ? '&' : '?';
+  return `${u}${sep}t=${Date.now()}`;
+}
 import { getUserProjects, deleteProject } from "@/server/projects";
 import type { Project } from "@/db/schema";
 
@@ -67,7 +80,7 @@ export default function MyProjectsPage() {
       return;
     }
     const a = document.createElement('a');
-    a.href = project.videoUrl;
+    a.href = videoSrc(project.videoUrl);
     a.download = `${project.name}.mp4`;
     document.body.appendChild(a);
     a.click();
@@ -164,7 +177,7 @@ export default function MyProjectsPage() {
                   <div className="relative aspect-video bg-black">
                     {project.videoUrl ? (
                       <video
-                        src={project.videoUrl}
+                        src={videoSrc(project.videoUrl)}
                         className="w-full h-full object-cover"
                         muted
                       />
@@ -278,7 +291,7 @@ export default function MyProjectsPage() {
               <div className="aspect-video bg-black rounded-lg overflow-hidden">
                 {selectedProject.videoUrl ? (
                   <video
-                    src={selectedProject.videoUrl}
+                    src={videoSrc(selectedProject.videoUrl)}
                     controls
                     autoPlay
                     className="w-full h-full"

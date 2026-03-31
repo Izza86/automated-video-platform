@@ -4,8 +4,16 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function EditProfilePage() {
-  const { currentUser } = await getCurrentUser();
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser) {
+    redirect("/login");
+  }
+
+  const { currentUser } = auth;
 
   // Admins should not use this page
   if (currentUser.role === 'admin') {

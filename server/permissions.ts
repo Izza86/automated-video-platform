@@ -1,21 +1,24 @@
 "use server";
 
-import { getCurrentUser } from "./users";
+import { getCurrentUser } from "@/server/users";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
  * Check whether the current session user is an admin.
  * Uses the DB-backed role field instead of the organization plugin.
  */
-export const isAdmin = async (): Promise<boolean | { success: false; error: string }> => {
+export const isAdmin = async (): Promise<boolean> => {
   try {
-    const { currentUser } = await getCurrentUser();
-    return currentUser.role === "admin";
+    const auth = await getCurrentUser();
+    if (!auth) return false;
+    return auth.currentUser.role === "admin";
   } catch (error) {
+    // Re-throw Next.js redirect errors — they must not be swallowed.
+    if (isRedirectError(error)) {
+      throw error;
+    }
     console.error(error);
-    return {
-      success: false,
-      error: "Failed to check permissions",
-    };
+    return false;
   }
 };
 

@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_EAGER_COMPONENT_BUNDLE: "true",
+  },
   // ─── Externalize heavy backend-only / AI libraries ───────────────
   // These are never needed in the browser bundle and would massively
   // slow down Turbopack compilation if it tried to resolve them.

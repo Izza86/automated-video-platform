@@ -2,18 +2,8 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { UploadCloud, Video, Sparkles, Play } from 'lucide-react';
-import dynamic from 'next/dynamic';
 import { LandingNavbar } from '@/components/landing/landing-navbar';
-
-const LandingBelowFold = dynamic(
-  () => import('@/components/landing/landing-below-fold'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="w-full min-h-screen bg-gradient-to-b from-[#1a1408] to-amber-950/10 animate-pulse" />
-    ),
-  }
-);
+import LandingBelowFold from '@/components/landing/landing-below-fold';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);

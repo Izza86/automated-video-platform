@@ -71,6 +71,8 @@ interface MLColorResult {
   grainDensity?: number;
   /** Luminance contrast standard deviation */
   contrastStd?: number;
+  /** Per-channel histogram CDF from ML analysis (256 bins each, 0-1) */
+  histogramCdf?: { r: number[]; g: number[]; b: number[] } | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,14 +91,14 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
     const probe = await probeVideo(videoPath);
     const videoDuration = probe.duration || 30;
 
-    // ── ML-first: ResNet-50 Style Encoder via Python ──────────────────
-    // Uses pre-trained ResNet-50 CNN to identify and transfer specific
-    // effects like focus-pulls, glitches, or color-pops from reference.
+    // ── ML-first: Reinhard LAB + K-Means via Python ────────────────────
+    // Lightweight colour analysis using Reinhard LAB statistics and
+    // K-Means palette clustering. No heavy model downloads needed.
     const mlResult = await runMLScript<MLColorResult>(
       "ml_color_transfer.py",
       videoPath,
       ["--frames", "10"],
-      600_000, // 600s timeout — ResNet-50 style encoder
+      60_000, // 60s timeout — Reinhard LAB is fast, no model downloads
     );
 
     if (mlResult && !mlResult.error && mlResult.frameCount && mlResult.frameCount > 0) {
@@ -155,9 +157,15 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
       const hasOffset = Math.abs(channelOffsets.r) > 0.01 || Math.abs(channelOffsets.g) > 0.01 || Math.abs(channelOffsets.b) > 0.01;
       const colorchannelmixerParams = hasOffset ? `rr=${rr}:gg=${gg}:bb=${bb}` : "";
 
-      // v8: Run temporal color analysis on the FULL video concurrently
-      const temporalSamples = await analyzeTemporalColor(exe, videoPath, videoDuration);
+      // v8: Run temporal color analysis AND histogram CDF on the FULL video concurrently
+      // ML script may provide its own CDF — use that as priority, fallback to FFmpeg extraction
+      const [temporalSamples, ffmpegCdf] = await Promise.all([
+        analyzeTemporalColor(exe, videoPath, videoDuration),
+        analyzeHistogramCdf(exe, videoPath),
+      ]);
+      const histogramCdf = mlResult.histogramCdf ?? ffmpegCdf;
       console.log(`[color-grade] Temporal color DNA: ${temporalSamples.length} samples across ${videoDuration.toFixed(1)}s`);
+      console.log(`[color-grade] Histogram CDF source: ${mlResult.histogramCdf ? "ML (Python)" : ffmpegCdf ? "FFmpeg extraction" : "NONE"}`);
 
       return {
         brightness,
@@ -182,6 +190,7 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
         filmStockLabel: "digital" as const,
         meanLuminance: Math.round(brightness * 255),
         stdLuminance: Math.round((mlResult.contrastStd ?? 0.2) * 128),
+        histogramCdf: histogramCdf ?? undefined,
         eqParams,
         colorbalanceParams,
         colorchannelmixerParams,
@@ -195,13 +204,14 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
 
     // Run independent analysis passes concurrently
     // v8: temporal color uses FULL duration, structural passes use limited duration for speed
-    const [signalResult, sharpnessResult, vignetteResult, histogramResult, midtoneResult, temporalSamples] = await Promise.all([
+    const [signalResult, sharpnessResult, vignetteResult, histogramResult, midtoneResult, temporalSamples, histogramCdf] = await Promise.all([
       analyzeSignalStats(exe, videoPath),
       analyzeSharpness(exe, videoPath),
       analyzeVignette(exe, videoPath),
       analyzeHistogramRegions(exe, videoPath),
       analyzeMidtones(exe, videoPath),
       analyzeTemporalColor(exe, videoPath, videoDuration),
+      analyzeHistogramCdf(exe, videoPath),
     ]);
     console.log(`[color-grade] Temporal color DNA: ${temporalSamples.length} samples across ${videoDuration.toFixed(1)}s`);
 
@@ -287,6 +297,7 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
         : "digital" as const,
       meanLuminance: Math.round(brightness * 255),
       stdLuminance: Math.round(contrast * 40),
+      histogramCdf: histogramCdf ?? undefined,
       eqParams,
       colorbalanceParams,
       colorchannelmixerParams,
@@ -578,6 +589,149 @@ async function analyzeHistogramRegions(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pass 5 — Histogram CDF Analysis (Per-Channel Cumulative Distribution)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract per-channel (R, G, B) histograms from the reference video and
+ * compute the Cumulative Distribution Function (CDF) for each channel.
+ *
+ * The CDF maps input intensity → output intensity and is used by
+ * edit-transfer.ts to build a `curves` filter that precisely matches
+ * the target's colour distribution to the reference's.
+ *
+ * Method: Extract frames as PNG images, decode to RGB, count pixel
+ * values per channel, normalise → CDF.
+ */
+async function analyzeHistogramCdf(
+  exe: string,
+  videoPath: string,
+): Promise<{ r: number[]; g: number[]; b: number[] } | null> {
+  try {
+    const tmpDir = makeTempDir("histogram-cdf");
+
+    // Extract ~10 evenly-spaced frames as PNG images
+    // (PNG is lossless → no JPEG compression artefacts affecting histogram)
+    const extractCmd = [
+      exe,
+      `-t ${STRUCTURAL_ANALYSIS_SEC}`,
+      `-i "${videoPath}"`,
+      `-vf "fps=1,scale=640:-2"`,
+      `-frames:v 10`,
+      `"${tmpDir}/frame_%03d.png"`,
+    ].join(" ");
+
+    await execAsync(extractCmd, { maxBuffer: 50 * 1024 * 1024 }).catch((e: any) => {
+      console.warn("[color-grade] Histogram CDF frame extraction stderr:", (e.stderr || "").slice(0, 300));
+    });
+
+    // Read all PNG frames and decode to raw pixel data
+    const fs = await import("fs");
+    const pathMod = await import("path");
+    // @ts-ignore — canvas is optional native module; fallback to rawvideo if unavailable
+    const { createCanvas, loadImage } = await import("canvas").catch(() => ({ createCanvas: null, loadImage: null }));
+
+    const files = fs.readdirSync(tmpDir).filter((f: string) => f.endsWith(".png")).sort();
+
+    if (files.length === 0) {
+      cleanTempDir(tmpDir);
+      console.warn("[color-grade] Histogram CDF: no frames extracted");
+      return null;
+    }
+
+    // Accumulate per-channel histograms (256 bins each)
+    const histR = new Float64Array(256);
+    const histG = new Float64Array(256);
+    const histB = new Float64Array(256);
+    let totalPixels = 0;
+
+    if (createCanvas && loadImage) {
+      // Path A: node-canvas available — decode PNG directly
+      for (const file of files) {
+        try {
+          const img = await loadImage(pathMod.join(tmpDir, file));
+          const canvas = createCanvas(img.width, img.height);
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, img.width, img.height);
+          const data = imageData.data; // RGBA interleaved
+
+          const pixelCount = img.width * img.height;
+          for (let i = 0; i < pixelCount; i++) {
+            histR[data[i * 4]]++;
+            histG[data[i * 4 + 1]]++;
+            histB[data[i * 4 + 2]]++;
+          }
+          totalPixels += pixelCount;
+        } catch {
+          // skip this frame
+        }
+      }
+    } else {
+      // Path B: no node-canvas — re-extract frames as raw RGB24 into single file
+      console.log("[color-grade] Histogram CDF: node-canvas unavailable, using rawvideo fallback");
+      const rawPath = pathMod.join(tmpDir, "frames.rgb");
+      const rawCmd = [
+        exe,
+        `-t ${STRUCTURAL_ANALYSIS_SEC}`,
+        `-i "${videoPath}"`,
+        `-vf "fps=1,scale=320:-2,format=rgb24"`,
+        `-frames:v 10`,
+        `-f rawvideo`,
+        `"${rawPath}"`,
+      ].join(" ");
+
+      await execAsync(rawCmd, { maxBuffer: 100 * 1024 * 1024 }).catch(() => {});
+
+      if (fs.existsSync(rawPath)) {
+        const data = fs.readFileSync(rawPath);
+        // Each pixel is 3 bytes (RGB24)
+        const pixelCount = Math.floor(data.length / 3);
+        for (let i = 0; i < pixelCount; i++) {
+          histR[data[i * 3]]++;
+          histG[data[i * 3 + 1]]++;
+          histB[data[i * 3 + 2]]++;
+        }
+        totalPixels = pixelCount;
+      }
+    }
+
+    cleanTempDir(tmpDir);
+
+    if (totalPixels === 0) {
+      console.warn("[color-grade] Histogram CDF: zero pixels read");
+      return null;
+    }
+
+    // Convert histograms to CDFs (normalised to 0-1)
+    const toCdf = (hist: Float64Array): number[] => {
+      const cdf = new Array<number>(256);
+      let cumulative = 0;
+      for (let i = 0; i < 256; i++) {
+        cumulative += hist[i];
+        cdf[i] = cumulative / totalPixels;
+      }
+      return cdf;
+    };
+
+    const cdf = {
+      r: toCdf(histR),
+      g: toCdf(histG),
+      b: toCdf(histB),
+    };
+
+    console.log(
+      `[color-grade] ✅ Histogram CDF computed: ${totalPixels.toLocaleString()} pixels from ${files.length} frames`
+    );
+
+    return cdf;
+  } catch (err) {
+    console.warn("[color-grade] Histogram CDF extraction failed:", err);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Classification Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -677,13 +831,13 @@ async function analyzeTemporalColor(
   duration: number,
 ): Promise<TemporalColorSample[]> {
   try {
-    // Sample at 1fps (one frame per second) across the FULL video
+    // v10.3: Sample at 5fps (every 0.2s) for sub-second flicker detection.
+    // Previously 1fps missed rapid brightness/contrast flashes.
     // signalstats gives us per-frame YAVG, SATAVG, YLOW, YHIGH
-    // metadata=print outputs frame-by-frame stats with timestamps
     const cmd = [
       exe,
       `-i "${videoPath}"`,
-      `-vf "fps=1,signalstats,metadata=print:file=-"`,
+      `-vf "fps=5,signalstats,metadata=print:file=-"`,
       `-f null -`,
     ].join(" ");
 
@@ -693,7 +847,21 @@ async function analyzeTemporalColor(
     });
 
     const combined = ((res as any).stdout ?? "") + "\n" + ((res as any).stderr ?? "");
-    return parseTemporalSignalStats(combined, duration);
+    const samples = parseTemporalSignalStats(combined, duration);
+
+    // ── Blur detection pass (Laplacian variance) ─────────────────────
+    //    Run a second lightweight FFmpeg pass at 5fps.
+    //    Compute per-frame blurriness using signalstats YAVG variance
+    //    between consecutive frames.  Low YHIGH-YLOW = blurry.
+    //    This detects intentional blur effects, defocus transitions,
+    //    and motion blur in the reference.
+    try {
+      await addBlurDetection(exe, videoPath, duration, samples);
+    } catch (blurErr) {
+      console.warn("[color-grade] Blur detection pass failed (non-fatal):", blurErr);
+    }
+
+    return samples;
   } catch (err: any) {
     // Try parsing partial output on error
     const combined = ((err.stdout ?? "") + "\n" + (err.stderr ?? "")).trim();
@@ -706,6 +874,117 @@ async function analyzeTemporalColor(
     }
     console.warn("[color-grade] Temporal color analysis failed, generating Global Look fallback");
     return buildGlobalLookFallback(exe, videoPath, duration);
+  }
+}
+
+/**
+ * Detect blur level per-frame using Laplacian variance via signalstats.
+ * Low dynamic range (YHIGH - YLOW) relative to mean indicates blur.
+ * This is computed from the existing samples — no extra FFmpeg pass needed.
+ *
+ * Supplements with edge-based blur detection: frames where the
+ * YAVG is normal but YHIGH-YLOW collapses indicate intentional blur.
+ */
+async function addBlurDetection(
+  exe: string,
+  videoPath: string,
+  duration: number,
+  samples: TemporalColorSample[],
+): Promise<void> {
+  if (samples.length < 2) return;
+
+  // Compute per-sample blur from dynamic range collapse.
+  // Sharp frames have wide dynamic range (YHIGH - YLOW > 150).
+  // Blurry frames have narrow range (< 80).
+  // We use the raw meanLuma and contrast (which encodes dynamic range)
+  // to derive blur level.
+  //
+  // blur = 1 - normalised_contrast (where contrast < baseline = blurry)
+  // Baseline contrast comes from the video's median.
+  const contrastValues = samples.map(s => s.contrast);
+  const sorted = [...contrastValues].sort((a, b) => a - b);
+  const medianContrast = sorted[Math.floor(sorted.length / 2)] || 1.0;
+
+  // Also run a separate Laplacian-based pass for more accurate blur
+  // Using FFmpeg's bwdif + signalstats to detect edge sharpness
+  try {
+    const blurCmd = [
+      exe,
+      `-i "${videoPath}"`,
+      // Extract 5fps, apply edge detection (Sobel-like via convolution),
+      // then measure the resulting edge energy via signalstats YAVG.
+      // High YAVG on edge-detected frames = sharp. Low = blurry.
+      `-vf "fps=5,convolution=0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0,signalstats,metadata=print:file=-"`,
+      `-f null -`,
+    ].join(" ");
+
+    const blurRes = await execAsync(blurCmd, {
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: Math.max(30_000, duration * 2_000),
+    });
+
+    const blurOutput = ((blurRes as any).stdout ?? "") + "\n" + ((blurRes as any).stderr ?? "");
+
+    // Parse Laplacian YAVG values — higher = sharper edges
+    const edgeValues: { time: number; edgeEnergy: number }[] = [];
+    let currentTime = -1;
+    let edgeYavg = 0;
+
+    for (const line of blurOutput.split("\n")) {
+      const timeMatch = line.match(/pts_time[=:](\d+\.?\d*)/);
+      if (timeMatch) {
+        if (currentTime >= 0) {
+          edgeValues.push({ time: currentTime, edgeEnergy: edgeYavg });
+        }
+        currentTime = parseFloat(timeMatch[1]);
+        edgeYavg = 0;
+        continue;
+      }
+      const yavgMatch = line.match(/YAVG=([\d.]+)/);
+      if (yavgMatch) { edgeYavg = parseFloat(yavgMatch[1]); }
+    }
+    if (currentTime >= 0) {
+      edgeValues.push({ time: currentTime, edgeEnergy: edgeYavg });
+    }
+
+    if (edgeValues.length > 0) {
+      // Normalise edge energy: find max for normalisation
+      const maxEdge = Math.max(...edgeValues.map(e => e.edgeEnergy), 1);
+
+      // Map edge energy to blur level: high edges = sharp (blur=0), low = blurry (blur=1)
+      for (const sample of samples) {
+        // Find nearest edge measurement
+        let nearest = edgeValues[0];
+        let nearestDist = Math.abs(sample.time_sec - nearest.time);
+        for (const ev of edgeValues) {
+          const dist = Math.abs(sample.time_sec - ev.time);
+          if (dist < nearestDist) {
+            nearest = ev;
+            nearestDist = dist;
+          }
+        }
+
+        if (nearestDist < 0.5) {
+          // blurLevel: 0 = perfectly sharp, 1 = very blurry
+          const sharpness = nearest.edgeEnergy / maxEdge;
+          sample.blurLevel = parseFloat(Math.max(0, Math.min(1, 1 - sharpness)).toFixed(3));
+        }
+      }
+
+      const blurCount = samples.filter(s => (s.blurLevel ?? 0) > 0.4).length;
+      console.log(`[color-grade] Blur detection: ${blurCount}/${samples.length} frames have blur > 0.4`);
+      return;
+    }
+  } catch {
+    // Laplacian pass failed — fall back to contrast-based blur
+  }
+
+  // Fallback: derive blur from contrast collapse
+  for (const sample of samples) {
+    const relativeContrast = sample.contrast / Math.max(medianContrast, 0.01);
+    // If contrast is much lower than median → blurry
+    const blurFromContrast = Math.max(0, Math.min(1, 1 - relativeContrast));
+    sample.blurLevel = parseFloat(blurFromContrast.toFixed(3));
   }
 }
 

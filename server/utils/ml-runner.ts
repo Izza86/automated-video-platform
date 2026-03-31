@@ -114,6 +114,41 @@ async function runColabMLScript<T = Record<string, unknown>>(
 }
 
 /**
+ * Run a Colab ML script with automatic retries.
+ *
+ * Retries up to `maxRetries` times with exponential backoff (2s, 4s, 8s)
+ * before returning null.  Designed for beat detection and other endpoints
+ * that may fail transiently due to network flickers or Colab cold-starts.
+ */
+export async function runColabMLScriptWithRetry<T = Record<string, unknown>>(
+  scriptName: string,
+  videoPath: string,
+  timeoutMs = 600_000,
+  maxRetries = 3,
+): Promise<T | null> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(
+      `[ml-runner] Colab ${scriptName} attempt ${attempt}/${maxRetries}`,
+    );
+    const result = await runColabMLScript<T>(scriptName, videoPath, timeoutMs);
+    if (result !== null) return result;
+
+    if (attempt < maxRetries) {
+      const backoffMs = 2000 * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+      console.warn(
+        `[ml-runner] Colab ${scriptName} attempt ${attempt} failed — retrying in ${backoffMs / 1000}s`,
+      );
+      await new Promise((r) => setTimeout(r, backoffMs));
+    }
+  }
+
+  console.error(
+    `[ml-runner] Colab ${scriptName} FAILED after ${maxRetries} attempts — falling back to local`,
+  );
+  return null;
+}
+
+/**
  * Run the full pipeline on the remote Colab GPU server.
  *
  * Uploads the video once and gets all 5 analysis results back.

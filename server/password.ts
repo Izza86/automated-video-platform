@@ -14,11 +14,13 @@ interface PasswordResetToken {
 const resetTokens = new Map<string, PasswordResetToken>();
 
 export const requestPasswordChange = async () => {
-  const { currentUser } = await getCurrentUser();
+  const authData = await getCurrentUser();
 
-  if (!currentUser) {
+  if (!authData || !authData.currentUser) {
     return { success: false, message: "Not authenticated" };
   }
+
+  const { currentUser } = authData;
 
   try {
     // Generate secure token
@@ -113,11 +115,13 @@ export const changePasswordDirect = async (
   currentPassword: string,
   newPassword: string
 ) => {
-  const { currentUser } = await getCurrentUser();
+  const authData = await getCurrentUser();
 
-  if (!currentUser) {
+  if (!authData || !authData.currentUser) {
     return { success: false, message: "Not authenticated" };
   }
+
+  const { currentUser } = authData;
 
   try {
     // Validate new password strength

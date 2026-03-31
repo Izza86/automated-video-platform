@@ -6,12 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
-export default async function ViewProfilePage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser) {
+export default async function ViewProfilePage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser) {
     redirect("/login");
   }
+
+  const { currentUser } = auth;
 
   // Admins don't need this page
   if (currentUser.role === "admin") {

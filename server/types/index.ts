@@ -73,6 +73,9 @@ export interface TemplateOverlayEffect {
 // ─────────────────────────────────────────────────────────────────────────────
 export type CutType = "hard_cut" | "gradual_transition";
 
+/** Specific transition subtype detected from frame analysis around boundary */
+export type TransitionSubtype = "dissolve" | "blur_transition" | "flash_transition" | "fade" | "unknown";
+
 export interface ShotBoundary {
   timestamp_sec: number;
   type: CutType;
@@ -83,6 +86,20 @@ export interface ShotBoundary {
   ecr_score: number;
   /** Twin-comparison temporal difference (0-1 normalised) */
   td_score: number;
+  /** Detected transition subtype for gradual transitions */
+  transitionSubtype?: TransitionSubtype;
+  /** Duration of the gradual transition in seconds */
+  transitionDurationSec?: number;
+  /** Optional reason/explanation for the boundary */
+  reason?: string;
+  /** v12: whether this is a synthetic boundary from fallback pacing */
+  synthetic?: boolean;
+  /** v12: metadata from micro-cut detection */
+  microCutMetadata?: {
+    trigger: "motion_spike" | "histogram_discontinuity" | "luminance_delta";
+    zoomFactor?: number;
+    luminanceDelta?: number;
+  };
 }
 
 export interface ShotDetectionResult {
@@ -313,6 +330,10 @@ export interface TemporalColorSample {
   saturation: number;
   /** Mean luma (0–255) at this moment */
   meanLuma: number;
+  /** Blur level at this moment (0 = sharp, 1 = very blurry).
+   *  Detected via Laplacian variance: low variance = blurry frame.
+   *  Used to replicate intentional blur effects from the reference. */
+  blurLevel?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

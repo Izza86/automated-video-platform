@@ -5,12 +5,16 @@ import { ArrowLeft, Shield, Users, Lock, Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-export default async function RolesPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function RolesPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = auth;
 
   const roles = [
     { name: "Admin", users: 2, color: "bg-red-500", permissions: ["All Access", "User Management", "System Settings"] },

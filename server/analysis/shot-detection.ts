@@ -51,10 +51,10 @@ const W_HIST = 0.40;
 const W_ECR  = 0.35;
 const W_TD   = 0.25;
 
-/** Fused-score thresholds */
-const HARD_CUT_THRESHOLD     = 0.15;
-const GRADUAL_THRESHOLD      = 0.08;
-const MIN_SHOT_GAP_SEC       = 0.30;
+/** Fused-score thresholds — v11: lowered for subtle cinematic transitions */
+const HARD_CUT_THRESHOLD     = 0.08;
+const GRADUAL_THRESHOLD      = 0.04;
+const MIN_SHOT_GAP_SEC       = 0.20;
 const GRADUAL_WINDOW_BUCKETS = 5;    // ±5 buckets (±0.5 s)
 
 /** Adaptive sampling: cap total analysis frames to keep runtime bounded */
@@ -457,6 +457,35 @@ function fuseThreeSignals(
         sustainedEnergy[i] >= sustainedEnergy[i + 1];
 
       if (isPeak) {
+        // ── Classify transition subtype from signal patterns ──────────
+        //    dissolve:         high hist_score (color gradual change) + low td_score
+        //    blur_transition:  low ecr_score (edges vanish) + moderate hist
+        //    flash_transition: very high td_score (bright spike) + high hist
+        //    fade:             gradually rising/falling hist + low ecr
+        let transitionSubtype: "dissolve" | "blur_transition" | "flash_transition" | "fade" | "unknown" = "unknown";
+
+        if (t > 0.5 && h > 0.3) {
+          transitionSubtype = "flash_transition";
+        } else if (e < 0.15 && h > 0.2) {
+          transitionSubtype = "blur_transition";
+        } else if (h > 0.3 && t < 0.3) {
+          transitionSubtype = "dissolve";
+        } else if (h > 0.1 && e < 0.2) {
+          transitionSubtype = "fade";
+        }
+
+        // Estimate transition duration from sustained energy window
+        let transitionStart = i;
+        let transitionEnd = i;
+        const energyThreshold = sustainedEnergy[i] * 0.5;
+        while (transitionStart > 0 && sustainedEnergy[transitionStart - 1] >= energyThreshold) {
+          transitionStart--;
+        }
+        while (transitionEnd < count - 1 && sustainedEnergy[transitionEnd + 1] >= energyThreshold) {
+          transitionEnd++;
+        }
+        const transitionDurationSec = parseFloat(((transitionEnd - transitionStart) * BUCKET).toFixed(3));
+
         raw.push({
           timestamp_sec: timestamp,
           type: "gradual_transition",
@@ -464,6 +493,8 @@ function fuseThreeSignals(
           hist_score: parseFloat(h.toFixed(3)),
           ecr_score: parseFloat(e.toFixed(3)),
           td_score: parseFloat(t.toFixed(3)),
+          transitionSubtype,
+          transitionDurationSec: Math.max(0.1, transitionDurationSec),
         });
       }
     }

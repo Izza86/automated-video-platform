@@ -4,6 +4,7 @@ import {
   UploadCloud, Video, Sparkles, Shield, Users, Folder, FileVideo, BarChart3, Plus, Activity, Server, Database, CheckCircle, Clock, CreditCard
 } from 'lucide-react';
 import { getCurrentUser } from "@/server/users";
+import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { UsersTable } from "@/components/users-table";
 import { cn } from "@/lib/utils";
@@ -11,9 +12,16 @@ import { getAdminDashboardStats, getUserDashboardStats } from "@/server/dashboar
 
 // Revalidate every 30 seconds for fresh data
 export const revalidate = 30;
+export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const { currentUser } = await getCurrentUser();
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser) {
+    redirect("/login");
+  }
+
+  const { currentUser } = auth;
   const isAdmin = currentUser.role === 'admin';
 
   if (isAdmin) {

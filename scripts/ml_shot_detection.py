@@ -118,7 +118,7 @@ def try_transnetv2(video_path, fps=5):
             conf = float(single_preds[end_frame]) if end_frame < len(single_preds) else 0.8
             boundaries.append({
                 "time_sec": round(t, 4),
-                "type": "cut" if conf > 0.7 else "gradual",
+                "type": "cut" if conf > 0.2 else "gradual",
                 "confidence": round(min(1.0, conf), 4),
                 "score": round(conf, 4),
             })
@@ -230,8 +230,8 @@ def detect_shots_classical(video_path, fps=2):
     fusion = 0.35*norm(hist_d) + 0.25*norm(lab_d) + 0.25*(1.0-np.array(ssim_s)) + 0.15*norm(edge_d)
     med = float(np.median(fusion))
     mad = float(np.median(np.abs(fusion - med)))
-    cut_th = max(0.15, med + 2.5*mad)
-    grad_th = max(0.10, med + 1.5*mad)
+    cut_th = max(0.08, med + 2.0*mad)
+    grad_th = max(0.05, med + 1.2*mad)
 
     boundaries = []
     min_gap = max(2, int(fps * 0.4))

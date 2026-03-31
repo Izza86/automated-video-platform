@@ -7,27 +7,13 @@
  * v11 — CINEMATIC SOUL TRANSFER
  * ──────────────────────────────
  * KEY CHANGES FROM v10:
- * • DYNAMIC LUMINANCE FLICKER: Instead of static sendcmd temporal_eq,
- *   uses FFmpeg expression-based brightness modulation driven by
- *   reference luma variance → sin(2π·t·flickerFreq) oscillation
- * • BEAT-TRIGGERED JITTER: rotate+scale shake on beat peaks using
- *   intensity-proportional random expressions (impact camera shake)
- * • ADAPTIVE BLUR: boxblur radius mapped from ML blur_detection
- *   scores (1-5) instead of static luma_radius=0
- * • DYNAMIC CDF CURVES: Per-channel CDF points interpolated into
- *   the curves filter dynamically — not static presets
- * • SHOT DETECTION: TransNetV2 threshold lowered to 0.2 for subtle
- *   cinematic transitions
- * • LUT PRIORITY: HALD CLUT prioritised over simple histogram
- *   matching to prevent washed-out look
- *
- * v10 Features Retained:
- * • Per-frame velocity via velocityTimeline (not averaged segments)
- * • Per-point zoom via raw zoomTimeline (not region-averaged)
- * • Per-second color via sendcmd with RELATIVE-DELTA passthrough
- * • Proportional time mapping: ref timestamps → target timestamps
- * • Beat-pulse brightness/contrast flashes (v10.3)
- * • Transition replication (flash, dissolve, fade, blur)
+ * • DYNAMIC LUMINANCE FLICKER: Expression-based brightness modulation
+ *   driven by reference luma variance → sin(2π·t·flickerFreq)
+ * • BEAT-TRIGGERED JITTER: rotate+scale shake on beat peaks
+ * • ADAPTIVE BLUR: boxblur radius mapped from ML blur_detection (1-5)
+ * • DYNAMIC CDF CURVES: 32-point per-channel interpolation
+ * • SHOT DETECTION: TransNetV2 threshold lowered to 0.2
+ * • LUT PRIORITY: HALD CLUT always applied for cinematic depth
  *
  * Master Logic Rules (permanent)
  * ──────────────────────────────
@@ -60,8 +46,8 @@ import type {
   AudioBeatResult,
   BeatEvent,
   CameraMotionSample,
-} from "../types";
-import type { TargetContentContext } from "../types/style-dna";
+} from "./server/types";
+import type { TargetContentContext } from "./server/types/style-dna";
 import {
   resolveFfmpeg,
   safeExe,
@@ -70,10 +56,10 @@ import {
   makeTempDir,
   cleanTempDir,
   writeTempFile,
-} from "../utils/ffmpeg";
-import { extractStyleDNA } from "../style/style-dna-extractor";
-import { adaptToTargetContent } from "../style/style-dna-adapter";
-import { generateFilterGraph } from "./filter-graph-generator";
+} from "./server/utils/ffmpeg";
+import { extractStyleDNA } from "./server/style/style-dna-extractor";
+import { adaptToTargetContent } from "./server/style/style-dna-adapter";
+import { generateFilterGraph } from "./server/editor/filter-graph-generator";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -315,21 +301,16 @@ export async function transferEdit(
     );
 
     // ── Stage 2: Build target context + semantic adaptation ───────────
-    //    The target beats/shots are the reference's beats/shots SCALED
-    //    to the target timeline.  The adapter will then select
-    //    semantically important moments from within this scaled context.
     console.log("[edit-transfer] Stage 2: Semantic adaptation to target content...");
 
     const targetCtx: TargetContentContext = {
       duration: targetDuration,
-      // Scale reference beats to target timeline for semantic selection
       beatEvents: (ab.beatEvents ?? []).map((b) => ({
         ...b,
         timestamp_sec: refDuration > 0
           ? (b.timestamp_sec / refDuration) * targetDuration
           : b.timestamp_sec,
       })),
-      // Scale reference shot boundaries to target timeline
       shotBoundaries: sd.cuts.map((c) => ({
         ...c,
         timestamp_sec: refDuration > 0
@@ -352,30 +333,8 @@ export async function transferEdit(
         `${adaptedDNA.texture.blurEvents.length} blur events`,
     );
 
-    // ── Shot-only segmentation + fallback pacing (v12 feature) ────────
-    // First try using hard cuts; if ≤1 detected, run fallback pacing
-    let hardCuts = sd.cuts.filter((c) => c.type === "hard_cut" && c.confidence > 0.2);
-    
-    // v12: Trigger fallback pacing if needed
-    if (hardCuts.length <= 1) {
-      console.log(
-        `[edit-transfer] Fallback pacing triggered: only ${hardCuts.length} hard cuts detected`
-      );
-      // Import and run fallback detector
-      const { orchestrateFallbackPacing } = await import("../analysis/fallback-pacing-detector");
-      const fallbackResult = orchestrateFallbackPacing(
-        sd.cuts,
-        mo,
-        cg,
-        targetDuration
-      );
-      console.log(
-        `[edit-transfer] ${fallbackResult.reason}`
-      );
-      // Use enhanced boundaries (may include synthetic cuts)
-      hardCuts = fallbackResult.syntheticBoundaries.filter((c) => c.type === "hard_cut");
-    }
-
+    // ── Shot-only segmentation (unchanged — TransNetV2 boundaries) ────
+    const hardCuts = sd.cuts.filter((c) => c.type === "hard_cut" && c.confidence > 0.2);
     const shotOnlyCutTimes = buildShotOnlyCutPoints(hardCuts, targetDuration, refDuration);
     let useHardCutSegmentation = false;
     let hardCutGraph = "";
@@ -443,34 +402,19 @@ export async function transferEdit(
       refDuration,
     });
 
-    // Merge useHald: HALD applies if CDF data made it into the adapted DNA
+    void generatedHardCutGraph;
+
     const applyHald = useHald && useHaldFromDNA;
 
     // ── Build the filter_complex graph string ─────────────────────────
-    //    videoFilterChain comes from generateFilterGraph() (Stage 3).
-    //    videoSrcLabel uses [segmented] when hard-cut segmentation ran.
     let filterGraph: string;
-
-    // When hard-cut segmentation is active, the video source is the
-    // [segmented] label from the trim→concat pre-pass, not [vidIdx:v].
     const videoSrcLabel = useHardCutSegmentation ? "[segmented]" : `[${vidIdx}:v]`;
-
-    // Loop reference audio when it is shorter than the target video.
     const loopAudio = refDuration > 0 && targetDuration > refDuration * 1.05;
 
     // ── Temporal Smoothing — DISABLED (v10.1) ─────────────────────────
-    //    v10.1: Shot-only segmentation produces only 3-8 segments
-    //    instead of 62, so minterpolate is no longer needed.
-    //    It was extremely slow and caused rendering timeouts.
     const temporalSmoothFilter = "";
 
     if (applyHald) {
-      // ── HALD CLUT path (no histogram match available) ────────────────
-      //    Path:  [src] → videoFilterChain → [v1]
-      //           [v1][haldIdx:v] haldclut  → [v2]
-      //           [v2] → temporal-smooth → format → [vout]
-      //
-      //    v10: Shadow protection curve REMOVED (was causing overexposure).
       const graphParts: string[] = [];
 
       if (useHardCutSegmentation) {
@@ -484,7 +428,6 @@ export async function transferEdit(
       );
       filterGraph = graphParts.join(";");
     } else {
-      // No HALD (or histogram match already in chain) — inline
       const graphParts: string[] = [];
 
       if (useHardCutSegmentation) {
@@ -495,13 +438,6 @@ export async function transferEdit(
       filterGraph = graphParts.join(";");
     }
 
-    // Write the graph to a temp script file — this eliminates all
-    // Windows shell quoting/escaping issues AND avoids the 8191-char
-    // command-line length limit on cmd.exe.
-    //
-    // IMPORTANT: Inside a script file there is no SHELL, but FFmpeg's
-    // own filter-graph parser still needs single quotes around option
-    // values that contain commas or parentheses (e.g. setpts, curves).
     const filterScriptPath = path.join(tmp, "filter_complex.txt");
     fs.writeFileSync(filterScriptPath, filterGraph, "utf-8");
 
@@ -511,12 +447,7 @@ export async function transferEdit(
     // ── Assemble inputs ───────────────────────────────────────────────
     const inputs: string[] = [];
     if (hasRefAudio) {
-      // If we need to loop the reference audio to cover the target
-      // duration, use -stream_loop on the reference input.
       if (loopAudio) {
-        // Smart infinite loop — seamless audio looping with -stream_loop -1
-        // FFmpeg loops the reference audio infinitely; the -t flag and
-        // atrim filter cap the output at targetDuration.
         inputs.push(`-stream_loop -1 -i "${referencePath}"`);
         filterLog.push(`audio-loop:seamless`);
       } else {
@@ -528,32 +459,11 @@ export async function transferEdit(
       inputs.push(`-i "${haldPath}"`);
     }
 
-    // ── Assemble mapping + audio handling ─────────────────────────────
-    //    Reference audio is ALWAYS the primary track when available.
-    //
-    //    AUDIO STRATEGY (Spatial DNA / Force Duration):
-    //      • aloop=loop=-1:size=2e9 → infinite loop of the audio stream
-    //      • atrim=0:<targetDuration> → hard-trim to exact target length
-    //      • asetpts=PTS-STARTPTS → reset timestamps after trim
-    //      • alimiter=limit=0.9 → prevent clipping
-    //    This guarantees NO audio gaps even when the video is stretched
-    //    by RAFT speed ramps or the reference is shorter than target.
-    //
-    //    DURATION ENFORCEMENT:
-    //      • -t <targetDuration> is ALWAYS applied (not just for looped
-    //        audio) to guarantee the output is exactly the right length.
-    //
-    //    NOTE: -map uses [vout] from the script file.  The square-bracket
-    //    label must be double-quoted on the command line so Windows
-    //    doesn't interpret the brackets.
     const mapping: string[] = [`-map "[vout]"`];
     const audioFlags: string[] = [];
 
     if (hasRefAudio) {
       mapping.push(`-map 0:a:0`);
-      // Full audio pipeline: loop → trim → reset PTS → limiter
-      // Ensures NO gaps even if RAFT stretches the video beyond
-      // the reference audio duration.
       audioFlags.push(
         `-af "aloop=loop=-1:size=2e9,atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS,alimiter=limit=0.9"`,
         `-c:a aac -b:a 192k`,
@@ -564,32 +474,12 @@ export async function transferEdit(
       audioFlags.push(`-c:a aac -b:a 192k`);
     }
 
-    // ── Encoder: Forced High Bitrate (permanent) ─────────────────────
     const codecFlags =
       `-c:v libx264 -profile:v high -pix_fmt yuv420p -preset slow -crf 18 -threads 0`;
 
     const bitrateFlags =
       `-b:v 5M -minrate 3M -maxrate 8M -bufsize 16M`;
 
-    // ── Final command (local fallback) ─────────────────────────────────
-    //    Uses standard -filter_complex with the graph read from the
-    //    temp script file.  Compatible with ALL FFmpeg versions (4.x+).
-    //    The primary render path is Colab GPU; this is the emergency
-    //    local fallback only.
-    // ── Final command ─────────────────────────────────────────────────
-    //    ORDER MATTERS for rate control:
-    //      1. inputs
-    //      2. -filter_complex <graph>
-    //      3. mapping
-    //      4. codec/quality flags
-    //      5. audio flags
-    //      6. movflags
-    //      7. bitrate flags  ← MUST be last before output path
-    //      8. -t duration    ← ALWAYS enforced for exact output length
-    //      9. output path
-    //
-    // Read the filter graph from the script file so we can pass it as
-    // an inline -filter_complex argument (works on FFmpeg 4.x – 8.x).
     const filterGraphInline = fs.readFileSync(filterScriptPath, "utf-8");
     const ffmpegCmd = [
       exe, "-y",
@@ -597,27 +487,17 @@ export async function transferEdit(
       ...inputs,
       `-filter_complex`,
       `"${filterGraphInline}"`,
-      
       ...mapping,
       codecFlags,
       ...audioFlags,
       `-movflags +faststart`,
       bitrateFlags,
-      // ALWAYS enforce strict output duration — prevents infinite
-      // processing from -stream_loop and guarantees exact length.
       `-t ${targetDuration.toFixed(3)}`,
       `"${outputPath}"`,
     ].join(" ");
 
-    // ── Execute — STRICT GPU OFFLOADING ───────────────────────────
-    //    Colab GPU is the PRIMARY and PREFERRED render method.
-    //    Local FFmpeg is an EMERGENCY FALLBACK only — it runs
-    //    ONLY when COLAB_GPU_URL is not configured at all.
-    //    If Colab is configured but fails, we surface the error
-    //    rather than silently falling back to slow local CPU.
     console.log("[edit-transfer] Filter graph:", filterLog.join(" → "));
 
-    // Read generated command-file content for Colab upload
     const temporalColorCmdContent = cmdFiles.temporalColor && fs.existsSync(cmdFiles.temporalColor)
       ? fs.readFileSync(cmdFiles.temporalColor, "utf-8")
       : null;
@@ -641,7 +521,6 @@ export async function transferEdit(
     const colabConfigured = !!process.env.COLAB_GPU_URL;
 
     if (colabConfigured) {
-      // ── PRIMARY PATH: Colab GPU render (h264_nvenc on Tesla T4) ───
       console.log("[edit-transfer] 🚀 COLAB_GPU_URL is set — using Colab as primary render");
 
       const colabResult = await renderOnColab({
@@ -663,13 +542,10 @@ export async function transferEdit(
       });
 
       if (colabResult) {
-        // Colab rendered successfully — write to output path
         await fs.promises.writeFile(outputPath, colabResult);
         filterLog.push("render:colab-gpu(h264_nvenc)");
         console.log(`[edit-transfer] ✅ Colab GPU render saved to ${outputPath}`);
       } else {
-        // Colab was configured but FAILED — surface the error clearly.
-        // Do NOT silently fall back to local FFmpeg.
         console.error("═══════════════════════════════════════════════════════════");
         console.error("[edit-transfer] COLAB GPU RENDER FAILED");
         console.error("[edit-transfer] COLAB_GPU_URL was set but the render did not succeed.");
@@ -688,7 +564,6 @@ export async function transferEdit(
         };
       }
     } else {
-      // ── EMERGENCY FALLBACK: Local FFmpeg (no Colab configured) ───
       console.warn(
         "[edit-transfer] ⚠ COLAB_GPU_URL not set — using local FFmpeg (slower, CPU-only)",
       );
@@ -942,31 +817,7 @@ function buildSetptsExpr(
     }
   }
 
-  // ── Step 4: cap merged segments to MAX_LOOP_ITERATIONS ────────────
-  //    Safety cap to prevent FFmpeg expression parser overflow.
-  let finalSegs = merged;
-  if (finalSegs.length > MAX_LOOP_ITERATIONS) {
-    const step = Math.ceil(finalSegs.length / MAX_LOOP_ITERATIONS);
-    const decimated: ResolvedSegment[] = [];
-    let cursor = 0;
-    for (let i = 0; i < finalSegs.length; i += step) {
-      const seg = finalSegs[i];
-      const end = (i + step < finalSegs.length)
-        ? finalSegs[i + step].inStart
-        : targetDuration;
-      const dur = end - seg.inStart;
-      decimated.push({
-        inStart: seg.inStart,
-        inEnd: end,
-        speed: seg.speed,
-        outStart: cursor,
-      });
-      cursor += dur / seg.speed;
-    }
-    finalSegs = decimated;
-  }
-
-  // ── Step 5: build nested if(between(T,…)) expression ───────────────
+  // ── Step 4: build nested if(between(T,…)) expression ───────────────
   //
   // QUOTING RULES FOR -filter_complex_script FILES:
   //   • Use 2 decimal places — some Gyan.dev FFmpeg builds choke on 6.
@@ -987,8 +838,8 @@ function buildSetptsExpr(
   // seconds.  Using the T-based form: (outStart + (T - inStart) / speed) / TB
 
   let expr = "PTS"; // fallback: identity
-  for (let i = finalSegs.length - 1; i >= 0; i--) {
-    const s = finalSegs[i];
+  for (let i = merged.length - 1; i >= 0; i--) {
+    const s = merged[i];
     const oS = s.outStart.toFixed(2);
     const iS = s.inStart.toFixed(2);
     const iE = s.inEnd.toFixed(2);
@@ -1355,14 +1206,21 @@ function buildSignalColorDNA(
   const histMean = histScores.reduce((a, b) => a + b, 0) / histScores.length;
   const ecrMean = ecrScores.reduce((a, b) => a + b, 0) / ecrScores.length;
 
-  // ── v10: Signal-driven eq is DISABLED ──────────────────────────────
-  //    The ECR-driven brightness/contrast/saturation adjustments were
-  //    causing overexposure ("vivid" auto-adjustment).  In v10, all
-  //    colour matching is handled by histogram CDF curves + temporal
-  //    relative deltas.  This function is kept as a no-op for backward
-  //    compatibility but emits no filters.
+  // ── ECR-driven eq refinement — EXTREME: wider deltas, no safety ────
+  //    EXTREME MODE: multiplied ECR/hist coefficients, wider clamps.
+  const contrastDelta = clampRange(ecrMean * 0.35, 0, 0.25);
+  const brightnessDelta = clampRange((ecrMean - 0.5) * 0.06, -0.04, 0.04);
+  const saturationDelta = clampRange(histMean * 0.2, 0, 0.18);
 
-  // NO filters emitted — histogram matching handles everything
+  if (contrastDelta > 0.02 || Math.abs(brightnessDelta) > 0.005 || saturationDelta > 0.02) {
+    const c = (1.0 + contrastDelta).toFixed(3);
+    const b = brightnessDelta.toFixed(4);
+    const s = (1.0 + saturationDelta).toFixed(3);
+    filters.push(`eq=contrast=${c}:brightness=${b}:saturation=${s}`);
+  }
+
+  // NO curves preset here — permanently removed to prevent black video
+
   return filters;
 }
 
@@ -1484,16 +1342,10 @@ function applyDTWAlignment(
 const MIN_CUT_GAP = 0.08;
 
 /**
- * Build cut points from SHOT DETECTION ONLY (no beats, no gap filling).
+ * Build a unified, beat-synced cut point list from audio beats + shot cuts.
  *
- * v10.1 CRITICAL CHANGE: Segmentation is driven exclusively by TransNetV2
- * shot boundaries (physical scene changes).  Beat events are handled
- * separately as inline overlay effects — they NEVER create segment cuts.
- *
- * This prevents the 62-segment jitter problem.  A 15-second clip with
- * 5 actual scene changes will produce only 6 segments — smooth and stable.
- *
- * @param hardCuts      ShotBoundary[] (pre-filtered for hard_cut type, conf > 0.5)
+ * @param beatEvents    BeatEvent[] from audio analysis
+ * @param hardCuts      ShotBoundary[] (pre-filtered for hard_cut type)
  * @param targetDuration Total duration of the target video
  * @param refDuration   Duration of the reference video
  * @returns Sorted array of cut-point timestamps (seconds)
@@ -1503,15 +1355,14 @@ function buildShotOnlyCutPoints(
   targetDuration: number,
   refDuration: number,
 ): number[] {
-  if (hardCuts.length === 0) return [];
-
-  const scale = targetDuration / Math.max(refDuration, 0.1);
+  // Only use TransNetV2 shot boundaries — NO beat events, NO gap filling.
+  // This produces clean cuts at actual scene changes only.
   const rawCuts: number[] = [];
+  const scale = targetDuration / Math.max(refDuration, 0.1);
 
-  // Only TransNetV2 shot boundaries — proportionally mapped
   for (const cut of hardCuts) {
     const mapped = cut.timestamp_sec * scale;
-    if (mapped > 0.5 && mapped < targetDuration - 0.5) {
+    if (mapped > 0.1 && mapped < targetDuration - 0.1) {
       rawCuts.push(mapped);
     }
   }
@@ -1525,7 +1376,6 @@ function buildShotOnlyCutPoints(
 
   const deduped: number[] = [];
   let lastCut = -Infinity;
-
   for (const t of sorted) {
     if (t - lastCut >= MIN_CUT_GAP) {
       deduped.push(t);
@@ -1533,24 +1383,7 @@ function buildShotOnlyCutPoints(
     }
   }
 
-  // NO gap filling — we only cut at actual scene changes.
-  // Long continuous shots stay as single unbroken segments.
   return deduped;
-}
-
-/**
- * LEGACY: Build a unified, beat-synced cut point list from audio beats + shot cuts.
- * DEPRECATED in v10.1 — kept for backward compatibility only.
- * Use buildShotOnlyCutPoints() for v10.1+ segmentation.
- */
-function buildBeatSyncedCutPoints(
-  beatEvents: BeatEvent[],
-  hardCuts: ShotBoundary[],
-  targetDuration: number,
-  refDuration: number,
-): number[] {
-  // Delegate to shot-only in v10.1
-  return buildShotOnlyCutPoints(hardCuts, targetDuration, refDuration);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1587,31 +1420,34 @@ interface TransitionAssignment {
 }
 
 /**
- * Assign a transition preset to each segment based on whether the
- * cut point coincides with a REFERENCE SHOT BOUNDARY.
- *
- * v10 CRITICAL CHANGE: Transitions are ONLY assigned at timestamps
- * that match reference shot-detection metadata (hard cuts from the
- * reference video).  This prevents synthetic flash/blur from firing
- * at every beat → eliminates the flicker caused by v9's aggressive
- * beat-intensity-based assignment.
- *
- * Segments whose cut point does NOT match a reference shot boundary
- * get NO transition (null) — a clean hard cut.
- *
- * @returns Array parallel to `segments` — null for no-transition cuts.
+ * Assign a transition preset to each segment based on beat intensity
+ * at the cut point.  Returns an array parallel to `segments` — null
+ * for the first segment (no transition) or when no beat matches.
  */
 function assignTransitionPresets(
   cutTimes: number[],
   beatEvents: BeatEvent[],
   segments: Array<{ start: number; end: number }>,
 ): Array<TransitionAssignment | null> {
-  // v10: Only subtle, non-flash transitions to avoid overexposure flicker.
-  // "flash" and aggressive brightness spikes are REMOVED entirely.
-  const refMatchedPresets: TransitionAssignment[] = [
-    { kind: "cross_blur", effectDurationSec: 0.08, intensity: 0.5, blurSigma: 6 },
-    { kind: "zoom_hit", effectDurationSec: 0.08, intensity: 0.6, scaleFrom: 1.0, scaleTo: 1.06 },
-    { kind: "zoom_out_hit", effectDurationSec: 0.08, intensity: 0.5, scaleFrom: 1.06, scaleTo: 1.0 },
+  // High-energy presets (intensity ≥ 0.7)
+  const highPresets: TransitionAssignment[] = [
+    { kind: "zoom_hit", effectDurationSec: 0.1, intensity: 1, scaleFrom: 1.0, scaleTo: 1.15 },
+    { kind: "flash", effectDurationSec: 0.08, intensity: 1, brightnessSpikeMultiplier: 3.0 },
+    { kind: "rgb_split", effectDurationSec: 0.08, intensity: 1, glitchOffsetPx: 12 },
+  ];
+
+  // Medium-energy presets (intensity 0.4–0.7)
+  const medPresets: TransitionAssignment[] = [
+    { kind: "whip_pan", effectDurationSec: 0.12, intensity: 0.7, blurSigma: 25 },
+    { kind: "glitch", effectDurationSec: 0.06, intensity: 0.7, glitchOffsetPx: 8 },
+    { kind: "motion_blur_swipe", effectDurationSec: 0.1, intensity: 0.7, blurSigma: 30 },
+    { kind: "zoom_out_hit", effectDurationSec: 0.1, intensity: 0.7, scaleFrom: 1.15, scaleTo: 1.0 },
+  ];
+
+  // Low-energy presets (intensity < 0.4)
+  const lowPresets: TransitionAssignment[] = [
+    { kind: "cross_blur", effectDurationSec: 0.14, intensity: 0.4, blurSigma: 8 },
+    { kind: "luma_fade", effectDurationSec: 0.15, intensity: 0.4, brightnessSpikeMultiplier: 1.5 },
   ];
 
   const assignments: Array<TransitionAssignment | null> = [];
@@ -1624,9 +1460,7 @@ function assignTransitionPresets(
 
     const cutTime = segments[i].start;
 
-    // v10: Only assign a transition if this cut point corresponds to
-    // a reference beat with intensity ≥ 0.8 (strong structural beat).
-    // All other cuts get a clean hard cut — no synthetic effects.
+    // Find nearest beat to this cut point
     let nearestBeat: BeatEvent | null = null;
     let nearestDist = Infinity;
     for (const b of beatEvents) {
@@ -1637,18 +1471,21 @@ function assignTransitionPresets(
       }
     }
 
-    // Only apply a transition if the beat is very close (< 0.1s) AND
-    // has high intensity — prevents synthetic flicker on weak beats
-    const isStrongRefBeat = nearestBeat && nearestDist < 0.1 && nearestBeat.intensity >= 0.8;
+    const beatIntensity = (nearestBeat && nearestDist < 0.5) ? nearestBeat.intensity : 0.3;
 
-    if (isStrongRefBeat) {
-      // Cycle through subtle presets
-      const preset = { ...refMatchedPresets[i % refMatchedPresets.length] };
-      assignments.push(preset);
+    // Select preset based on intensity
+    let pool: TransitionAssignment[];
+    if (beatIntensity >= 0.7) {
+      pool = highPresets;
+    } else if (beatIntensity >= 0.4) {
+      pool = medPresets;
     } else {
-      // Clean hard cut — no transition effect
-      assignments.push(null);
+      pool = lowPresets;
     }
+
+    // Cycle through the pool to avoid repetitive transitions
+    const preset = { ...pool[i % pool.length], intensity: beatIntensity };
+    assignments.push(preset);
   }
 
   return assignments;
@@ -1691,13 +1528,17 @@ function buildTransitionFilter(
       return `zoompan=z='if(between(on,0,${frames}),${scaleStart}-${((parseFloat(scaleStart) - 1.0) / frames).toFixed(5)}*on,1)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=iw:ih:fps=30`;
     }
 
-    // ── Flash: REMOVED in v10 ────────────────────────────────────────
-    //    Flash transitions with brightness spikes were the primary
-    //    cause of overexposure flicker.  Replaced with a very subtle
-    //    contrast bump that doesn't blow out highlights.
+    // ── Flash: brightness + contrast spike ──────────────────────────
     case "flash": {
-      // v10: Minimal contrast-only bump, NO brightness increase
-      return `eq=contrast=1.08:${enableExpr}`;
+      // v9: Synchronized flash using brightness + contrast for a more
+      // dynamic visual punch on every detected beat.  The contrast
+      // boost (1.4) adds depth so the flash isn't just a flat white-out.
+      const spike = transition.brightnessSpikeMultiplier ?? 3.0;
+      // Scale brightness proportionally to spike intensity, capped at 0.35
+      const brightVal = Math.min(0.35, 0.25 * (spike / 3.0)).toFixed(2);
+      // Contrast boost scales with intensity but floor at 1.4
+      const contrastVal = Math.max(1.4, 1.4 * (spike / 3.0)).toFixed(2);
+      return `eq=brightness=${brightVal}:contrast=${contrastVal}:${enableExpr}`;
     }
 
     // ── Whip Pan: horizontal blur spike ─────────────────────────────
@@ -1707,11 +1548,11 @@ function buildTransitionFilter(
       return `boxblur=luma_radius=${sigma}:luma_power=1:${enableExpr}`;
     }
 
-    // ── Luma Fade: v10 ultra-conservative ────────────────────────────
-    //    Capped at brightness=0.03 (barely perceptible) to prevent
-    //    the overexposure flicker seen in v9.
+    // ── Luma Fade: gentle brightness lift ───────────────────────────
     case "luma_fade": {
-      return `eq=brightness=0.03:${enableExpr}`;
+      const mult = transition.brightnessSpikeMultiplier ?? 1.5;
+      const brightVal = Math.min(0.5, (mult - 1.0) * 0.4).toFixed(2);
+      return `eq=brightness=${brightVal}:${enableExpr}`;
     }
 
     // ── Glitch: RGB channel offset ──────────────────────────────────
@@ -1740,10 +1581,10 @@ function buildTransitionFilter(
       return `rgbashift=rh=${offset}:rv=${Math.round(offset / 3)}:bh=${-offset}:bv=${-Math.round(offset / 3)}:${enableExpr}`;
     }
 
-    // ── Wipe / Slide: v10 uses minimal contrast bump (no brightness spike) ──
+    // ── Wipe / Slide: rendered as flash (requires 2-input xfade, too complex for concat) ──
     case "wipe":
     case "slide": {
-      return `eq=contrast=1.05:${enableExpr}`;
+      return `eq=brightness=0.25:${enableExpr}`;
     }
 
     default:

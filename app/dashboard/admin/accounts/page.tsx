@@ -4,12 +4,16 @@ import Link from "next/link";
 import { ArrowLeft, Lock, Key, LogOut, Mail, UserX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default async function AccountsPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function AccountsPage() {
+  const authData = await getCurrentUser();
+
+  if (!authData || !authData.currentUser || authData.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = authData;
 
   const accountActions = [
     { title: "Reset Password", icon: Key, description: "Send password reset link to user", color: "from-blue-600 to-cyan-600" },

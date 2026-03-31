@@ -4,12 +4,16 @@ import Link from "next/link";
 import { ArrowLeft, Database, HardDrive, Video, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export default async function QuotasPage() {
-  const { currentUser } = await getCurrentUser();
+export const dynamic = "force-dynamic";
 
-  if (!currentUser || currentUser.role !== "admin") {
+export default async function QuotasPage() {
+  const auth = await getCurrentUser();
+
+  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
+
+  const { currentUser } = auth;
 
   const quotaTypes = [
     { title: "Storage Limit", current: "50 GB", max: "100 GB", icon: HardDrive, color: "from-blue-600 to-cyan-600" },

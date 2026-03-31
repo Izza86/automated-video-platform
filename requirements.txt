@@ -3,18 +3,23 @@ scenedetect[opencv]
 numpy
 scikit-learn
 # ── ML Models for Professional Video Analysis ──
+# madmom: RNN-based beat tracking (3× bidirectional LSTM + DBN)
+#   ~95% F-measure vs ~80% for librosa-only. Requires Cython.
 madmom>=0.16.1
 librosa>=0.10.0
 soundfile>=0.12.0
 scikit-image>=0.22.0
 scipy>=1.11.0
+cython>=0.29.0
 # ── Real Neural Network Models ──
-# TransNetV2: 3D DDCNN shot boundary detection (Teed & Deng 2020)
+# TransNetV2: 3D DDCNN shot boundary detection (Souček & Lokoč 2020)
 transnetv2
-# PyTorch + TorchVision: RAFT optical flow, VGG-19 Gram matrix
+# PyTorch + TorchVision: RAFT optical flow (Teed & Deng, ECCV 2020)
 torch>=2.0.0
 torchvision>=0.15.0
-# Depth-Anything V2: Monocular depth estimation via HuggingFace
+# Depth-Anything V2: Monocular depth estimation via HuggingFace (Yang 2024)
 transformers>=4.30.0
 # timm: Required by MiDaS DPT and some HuggingFace vision models
 timm>=0.9.0
+# Pillow: required by Depth-Anything V2 image processor
+Pillow>=9.0.0

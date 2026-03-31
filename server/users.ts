@@ -36,6 +36,17 @@ export const getCurrentUser = async () => {
       throw error;
     }
 
+    // During `next build` prerendering, headers() throws DYNAMIC_SERVER_USAGE.
+    // Return null so callers redirect gracefully instead of triggering a
+    // NEXT_REDIRECT chain that lets parallel DB queries crash with ENOTFOUND.
+    if (
+      error instanceof Error &&
+      "digest" in error &&
+      error.digest === "DYNAMIC_SERVER_USAGE"
+    ) {
+      return null;
+    }
+
     // Gracefully handle DB/session query timeouts (e.g. pool exhaustion
     // while FFmpeg is running) instead of crashing the Dashboard Layout.
     const msg = error instanceof Error ? error.message : String(error);
@@ -54,14 +65,19 @@ export const getCurrentUser = async () => {
 
 // Helper function to check if user is admin
 export const isAdmin = async () => {
-  const { currentUser } = await getCurrentUser();
-  return currentUser.role === 'admin';
+  const result = await getCurrentUser();
+  if (!result) return false;
+  return result.currentUser.role === 'admin';
 };
 
 // Get all users (admin only)
 export const getAllUsers = async () => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) {
+      return { success: false, message: "Not authenticated.", users: [] };
+    }
+    const { currentUser } = authData;
     
     // Check if current user is admin
     if (currentUser.role !== 'admin') {
@@ -101,7 +117,9 @@ export const getAllUsers = async () => {
 // Update user role (admin only)
 export const updateUserRole = async (userId: string, newRole: string) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
     
     if (currentUser.role !== 'admin') {
       return {
@@ -141,7 +159,9 @@ export const updateUserByAdmin = async (
   role: string
 ) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
     
     if (currentUser.role !== 'admin') {
       return {
@@ -202,7 +222,9 @@ export const updateUserByAdmin = async (
 // Delete user (admin only)
 export const deleteUser = async (userId: string) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
     
     if (currentUser.role !== 'admin') {
       return {
@@ -237,7 +259,9 @@ export const deleteUser = async (userId: string) => {
 // Send email to user (admin only)
 export const sendEmailToUser = async (userId: string, subject: string, message: string) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
     
     if (currentUser.role !== 'admin') {
       return {
@@ -282,7 +306,9 @@ export const addNewUser = async (
   role: string
 ) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
     
     if (currentUser.role !== 'admin') {
       return {
@@ -364,7 +390,9 @@ export const addNewUser = async (
 // Helper function to promote user to admin (only for initial setup or by existing admin)
 export const promoteToAdmin = async (userId: string) => {
   try {
-    const { currentUser } = await getCurrentUser();
+    const authData = await getCurrentUser();
+    if (!authData) return { success: false, message: "Not authenticated." };
+    const { currentUser } = authData;
     
     // Check if current user is admin (for non-initial setup)
     if (currentUser.role !== 'admin') {
