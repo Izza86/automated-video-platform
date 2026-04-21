@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import type React from "react";
 import { LampAuthScene } from "@/components/login/lamp-auth-scene";
 
 interface LampWrapperProps {

@@ -15,16 +15,19 @@ export default function Error({
   }, [error]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4">
-      <div className="text-center space-y-4 max-w-md">
+    <div className="flex min-h-screen flex-col items-center justify-center p-4">
+      <div className="max-w-md space-y-4 text-center">
         <div className="text-6xl">⚠️</div>
-        <h2 className="text-2xl font-bold">Something went wrong!</h2>
+        <h2 className="font-bold text-2xl">Something went wrong!</h2>
         <p className="text-muted-foreground">
           We encountered an error while loading this page.
         </p>
-        <div className="flex gap-4 justify-center">
+        <div className="flex justify-center gap-4">
           <Button onClick={() => reset()}>Try again</Button>
-          <Button variant="outline" onClick={() => window.location.href = "/"}>
+          <Button
+            onClick={() => (window.location.href = "/")}
+            variant="outline"
+          >
             Go home
           </Button>
         </div>

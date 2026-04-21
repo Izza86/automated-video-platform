@@ -45,6 +45,14 @@
 }
 
 :root {
+  /* Provide local fallbacks when Next cannot fetch Google Fonts during build. */
+  --font-geist-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  --font-geist-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.147 0.004 49.25);
@@ -82,12 +90,12 @@
 .dark {
   --background: oklch(0.16 0.03 75);
   --foreground: oklch(0.985 0.001 106.423);
-  --card: oklch(0.20 0.035 70);
+  --card: oklch(0.2 0.035 70);
   --card-foreground: oklch(0.985 0.001 106.423);
-  --popover: oklch(0.20 0.035 70);
+  --popover: oklch(0.2 0.035 70);
   --popover-foreground: oklch(0.985 0.001 106.423);
   --primary: oklch(0.923 0.003 48.717);
-  --primary-foreground: oklch(0.20 0.035 70);
+  --primary-foreground: oklch(0.2 0.035 70);
   --secondary: oklch(0.25 0.03 65);
   --secondary-foreground: oklch(0.985 0.001 106.423);
   --muted: oklch(0.25 0.03 65);
@@ -124,7 +132,8 @@
 
 /* Custom animations for auth pages */
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px);
   }
   50% {
@@ -198,7 +207,8 @@
 
 /* Slide animation for before/after comparison */
 @keyframes slideLeft {
-  0%, 100% {
+  0%,
+  100% {
     left: 50%;
   }
   50% {

@@ -1,10 +1,10 @@
 "use server";
 
-import { db } from "@/db/drizzle";
-import { subscription, subscriptionPlan, usage, user } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { and, desc, eq } from "drizzle-orm";
 import { headers } from "next/headers";
-import { eq, and, desc } from "drizzle-orm";
+import { db } from "@/db/drizzle";
+import { subscription, subscriptionPlan, usage } from "@/db/schema";
+import { auth } from "@/lib/auth";
 
 /**
  * Get current user's subscription with plan details
@@ -39,16 +39,17 @@ export async function getUserSubscription(userId?: string) {
  */
 export async function hasActiveSubscription(userId?: string): Promise<boolean> {
   const userSub = await getUserSubscription(userId);
-  
+
   if (!userSub) {
     return false;
   }
 
-  const isActive = 
-    userSub.subscription.status === "active" || 
+  const isActive =
+    userSub.subscription.status === "active" ||
     userSub.subscription.status === "trialing";
 
-  const isNotExpired = new Date(userSub.subscription.currentPeriodEnd) > new Date();
+  const isNotExpired =
+    new Date(userSub.subscription.currentPeriodEnd) > new Date();
 
   return isActive && isNotExpired;
 }
@@ -107,10 +108,10 @@ export async function canCreateVideo(userId?: string): Promise<{
 
   // Get user's subscription
   const userSub = await getUserSubscription(currentUserId);
-  
+
   // If no subscription, default to free plan (5 videos)
   const videoLimit = userSub?.plan.videoLimit ?? 5;
-  
+
   // null means unlimited
   if (videoLimit === null) {
     return { allowed: true };

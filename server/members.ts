@@ -17,12 +17,18 @@ export const addMember = async (
   try {
     const admin = await isAdmin();
     if (!admin) {
-      return { success: false, error: "You are not authorized to add members." };
+      return {
+        success: false,
+        error: "You are not authorized to add members.",
+      };
     }
 
     // TODO: Implement when organization plugin is enabled
     console.warn("addMember called but organization plugin is not configured.");
-    return { success: false, error: "Organization features are not yet enabled." };
+    return {
+      success: false,
+      error: "Organization features are not yet enabled.",
+    };
   } catch (error) {
     console.error(error);
     throw new Error("Failed to add member.");
@@ -41,8 +47,13 @@ export const removeMember = async (memberId: string) => {
 
   try {
     // TODO: Implement when organization plugin is enabled
-    console.warn("removeMember called but organization plugin is not configured.");
-    return { success: false, error: "Organization features are not yet enabled." };
+    console.warn(
+      "removeMember called but organization plugin is not configured."
+    );
+    return {
+      success: false,
+      error: "Organization features are not yet enabled.",
+    };
   } catch (error) {
     console.error(error);
     return {

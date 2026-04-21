@@ -33,21 +33,21 @@
  */
 
 import type {
-  EditingBlueprint,
+  AdaptationStrategy,
   BlueprintEvent,
   BlueprintSegment,
   BlueprintTransferOptions,
-  AdaptationStrategy,
-  EditInstructions,
-  EditCutInstruction,
-  EditSpeedInstruction,
-  EditTransitionInstruction,
-  EditStyleInstruction,
-  EditInstructionsSummary,
   CutType,
-  TransitionPreset,
+  EditCutInstruction,
+  EditInstructions,
+  EditInstructionsSummary,
+  EditingBlueprint,
+  EditSpeedInstruction,
+  EditStyleInstruction,
+  EditTransitionInstruction,
   MotionPreset,
   TemplateOverlayEffect,
+  TransitionPreset,
 } from "../types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,7 +254,7 @@ const TEMPLATE_REGISTRY: Record<string, TemplateConfig> = {
 export function transferBlueprint(
   blueprint: EditingBlueprint,
   targetDuration: number,
-  opts: BlueprintTransferOptions = {},
+  opts: BlueprintTransferOptions = {}
 ): EditInstructions {
   const t0 = performance.now();
 
@@ -278,16 +278,14 @@ export function transferBlueprint(
     : [];
 
   // ── 3. Adapt cut events ──────────────────────────────────────────────
-  const cutEvents = blueprint.timeline.filter(
-    (e) => e.kind === "cut",
-  );
+  const cutEvents = blueprint.timeline.filter((e) => e.kind === "cut");
   const cuts = adaptCuts(
     cutEvents,
     mapTime,
     tgtDur,
     targetBeatGrid,
     preserveBeats,
-    transitionOverlap,
+    transitionOverlap
   );
 
   // ── 4. Adapt speed segments ──────────────────────────────────────────
@@ -297,7 +295,7 @@ export function transferBlueprint(
     tgtDur,
     minSeg,
     targetBeatGrid,
-    preserveBeats,
+    preserveBeats
   );
 
   // ── 5. Adapt transitions (beat-aligned, rhythm shifts, jhatkas) ──────
@@ -305,14 +303,14 @@ export function transferBlueprint(
     (e) =>
       e.kind === "beat_transition" ||
       e.kind === "rhythm_shift" ||
-      e.kind === "jhatka",
+      e.kind === "jhatka"
   );
   const templateId = opts.templateId;
   const transitions = adaptTransitions(
     transitionEvents,
     mapTime,
     tgtDur,
-    templateId,
+    templateId
   );
 
   // ── 6. Adapt style blocks ─────────────────────────────────────────
@@ -323,7 +321,7 @@ export function transferBlueprint(
         tgtDur,
         minSeg,
         targetBeatGrid,
-        templateId,
+        templateId
       )
     : [];
 
@@ -371,11 +369,20 @@ export function transferBlueprint(
     }
   }
   for (const sb of styleBlocks) {
-    if (sb.templateOverlays && sb.templateOverlays.length > MAX_OVERLAYS_PER_BLOCK) {
-      sb.templateOverlays = sb.templateOverlays.slice(0, MAX_OVERLAYS_PER_BLOCK);
+    if (
+      sb.templateOverlays &&
+      sb.templateOverlays.length > MAX_OVERLAYS_PER_BLOCK
+    ) {
+      sb.templateOverlays = sb.templateOverlays.slice(
+        0,
+        MAX_OVERLAYS_PER_BLOCK
+      );
     }
   }
-  if (templateOverlays && templateOverlays.length > MAX_TOTAL_TEMPLATE_OVERLAYS) {
+  if (
+    templateOverlays &&
+    templateOverlays.length > MAX_TOTAL_TEMPLATE_OVERLAYS
+  ) {
     templateOverlays = templateOverlays.slice(0, MAX_TOTAL_TEMPLATE_OVERLAYS);
   }
 
@@ -411,7 +418,7 @@ type TimeMapper = (srcTime: number) => number;
 function buildTimeMapper(
   strategy: AdaptationStrategy,
   srcDur: number,
-  tgtDur: number,
+  tgtDur: number
 ): TimeMapper {
   if (srcDur <= 0) return (t) => t;
 
@@ -440,7 +447,7 @@ function buildTimeMapper(
 function buildScaledBeatGrid(
   blueprint: EditingBlueprint,
   mapTime: TimeMapper,
-  tgtDur: number,
+  tgtDur: number
 ): number[] {
   const beats = blueprint.rawMetadata.audio.beatEvents
     .map((b) => mapTime(b.timestamp_sec))
@@ -452,10 +459,12 @@ function buildScaledBeatGrid(
     if (srcDur > 0 && tgtDur > srcDur) {
       const iterations = Math.ceil(tgtDur / srcDur);
       const baseBeatCount = beats.length;
-      for (let i = 1; i < iterations && beats.length < 10000; i++) {
+      for (let i = 1; i < iterations && beats.length < 10_000; i++) {
         const offset = i * srcDur;
         for (let j = 0; j < baseBeatCount; j++) {
-          const t = round3(blueprint.rawMetadata.audio.beatEvents[j].timestamp_sec + offset);
+          const t = round3(
+            blueprint.rawMetadata.audio.beatEvents[j].timestamp_sec + offset
+          );
           if (t <= tgtDur) beats.push(t);
         }
       }
@@ -475,7 +484,7 @@ function adaptCuts(
   tgtDur: number,
   beatGrid: number[],
   preserveBeats: boolean,
-  transitionOverlap: number,
+  transitionOverlap: number
 ): EditCutInstruction[] {
   const instructions: EditCutInstruction[] = [];
   const seenTimes = new Set<number>();
@@ -505,8 +514,7 @@ function adaptCuts(
     if (seenTimes.has(key)) return;
     seenTimes.add(key);
 
-    const cutType: CutType =
-      (evt.params.cutType as CutType) || "hard_cut";
+    const cutType: CutType = (evt.params.cutType as CutType) || "hard_cut";
 
     instructions.push({
       time_sec: round3(finalTime),
@@ -521,11 +529,8 @@ function adaptCuts(
 
   // For loop strategy, tile events across target duration
   const srcDur =
-    cutEvents.length > 0
-      ? Math.max(...cutEvents.map((e) => e.time_sec), 1)
-      : 1;
-  const iterations =
-    tgtDur > srcDur ? Math.ceil(tgtDur / srcDur) : 1;
+    cutEvents.length > 0 ? Math.max(...cutEvents.map((e) => e.time_sec), 1) : 1;
+  const iterations = tgtDur > srcDur ? Math.ceil(tgtDur / srcDur) : 1;
 
   for (let iter = 0; iter < iterations; iter++) {
     const offset = iter * srcDur;
@@ -549,7 +554,7 @@ function adaptSpeedSegments(
   tgtDur: number,
   minSeg: number,
   beatGrid: number[],
-  preserveBeats: boolean,
+  preserveBeats: boolean
 ): EditSpeedInstruction[] {
   if (segments.length === 0) {
     // Fallback: single normal-speed segment covering the whole target
@@ -589,7 +594,10 @@ function adaptSpeedSegments(
       let beatAligned = seg.beatAligned;
       if (preserveBeats && beatGrid.length > 0 && start > 0) {
         const nearest = binarySearchNearest(beatGrid, start);
-        if (nearest !== null && Math.abs(nearest - start) <= BEAT_SNAP_TOLERANCE_SEC) {
+        if (
+          nearest !== null &&
+          Math.abs(nearest - start) <= BEAT_SNAP_TOLERANCE_SEC
+        ) {
           start = nearest;
           beatAligned = true;
         }
@@ -619,7 +627,7 @@ function adaptSpeedSegments(
 function ensureFullCoverage(
   segments: EditSpeedInstruction[],
   tgtDur: number,
-  minSeg: number,
+  minSeg: number
 ): EditSpeedInstruction[] {
   if (segments.length === 0) {
     return [
@@ -695,7 +703,7 @@ function adaptTransitions(
   events: BlueprintEvent[],
   mapTime: TimeMapper,
   tgtDur: number,
-  templateId?: string,
+  templateId?: string
 ): EditTransitionInstruction[] {
   const instructions: EditTransitionInstruction[] = [];
   const seenTimes = new Set<string>();
@@ -704,7 +712,7 @@ function adaptTransitions(
     t: number,
     preset: TransitionPresetDef,
     evt: BlueprintEvent,
-    overrides: Partial<EditTransitionInstruction> = {},
+    overrides: Partial<EditTransitionInstruction> = {}
   ) => {
     const key = `${Math.round(t * 1000)}_${preset.kind}`;
     if (seenTimes.has(key)) return;
@@ -747,11 +755,15 @@ function adaptTransitions(
         pushInstruction(t, TRANSITION_PRESETS.whip_pan, evt);
       } else {
         // Standard beat → beat_cut (resolved from preset library)
-        pushInstruction(t, {
-          kind: "beat_cut",
-          effectDurationSec: 0.02,
-          description: "Hard cut on beat",
-        }, evt);
+        pushInstruction(
+          t,
+          {
+            kind: "beat_cut",
+            effectDurationSec: 0.02,
+            description: "Hard cut on beat",
+          },
+          evt
+        );
       }
 
       // EXTREME: Force zoom_hit on EVERY beat_transition with confidence > 0.05
@@ -771,8 +783,9 @@ function adaptTransitions(
         const tplConfig = TEMPLATE_REGISTRY[templateId];
         const flashPreset = TRANSITION_PRESETS.flash;
         pushInstruction(t, flashPreset, evt, {
-          brightnessSpikeMultiplier:
-            tplConfig ? 3.5 : flashPreset.brightnessSpikeMultiplier,
+          brightnessSpikeMultiplier: tplConfig
+            ? 3.5
+            : flashPreset.brightnessSpikeMultiplier,
           description: `Template flash [${templateId}]`,
         });
       }
@@ -781,20 +794,25 @@ function adaptTransitions(
       pushInstruction(t, TRANSITION_PRESETS.luma_fade, evt);
     } else {
       // Fallback: beat_speed_change
-      pushInstruction(t, {
-        kind: "beat_speed_change",
-        effectDurationSec: 0.05,
-        description: "Beat-synced speed change",
-      }, evt);
+      pushInstruction(
+        t,
+        {
+          kind: "beat_speed_change",
+          effectDurationSec: 0.05,
+          description: "Beat-synced speed change",
+        },
+        evt
+      );
     }
 
     // ── Param-driven preset overrides ───────────────────────────────
     // If the blueprint event itself carries a `flash` or `glitch` param,
     // inject the corresponding preset regardless of kind.
     if (evt.params.flash === true || evt.params.flash === "true") {
-      const spike = typeof evt.params.brightness_spike === "number"
-        ? evt.params.brightness_spike
-        : 3.0;
+      const spike =
+        typeof evt.params.brightness_spike === "number"
+          ? evt.params.brightness_spike
+          : 3.0;
       pushInstruction(t, TRANSITION_PRESETS.flash, evt, {
         brightnessSpikeMultiplier: spike as number,
         description: `Flash (brightness_spike=${spike})`,
@@ -813,9 +831,10 @@ function adaptTransitions(
       pushInstruction(t, TRANSITION_PRESETS.slide, evt);
     }
     if (evt.params.motion_blur === true || evt.params.motion_blur === "true") {
-      const angle = typeof evt.params.motion_blur_angle === "number"
-        ? evt.params.motion_blur_angle
-        : 0;
+      const angle =
+        typeof evt.params.motion_blur_angle === "number"
+          ? evt.params.motion_blur_angle
+          : 0;
       pushInstruction(t, TRANSITION_PRESETS.motion_blur_swipe, evt, {
         motionBlurAngle: angle as number,
         description: `Motion blur swipe (angle=${angle}°)`,
@@ -862,7 +881,12 @@ function deriveMotionPreset(seg: BlueprintSegment): MotionPreset {
   if (speed > 0.9 && speed < 1.1 && beatAligned && rhythmEnergy === "high") {
     return "tracking_shot";
   }
-  if (beatAligned && (rhythmEnergy === "high" || rhythmEnergy === "peak" || rhythmEnergy === "medium")) {
+  if (
+    beatAligned &&
+    (rhythmEnergy === "high" ||
+      rhythmEnergy === "peak" ||
+      rhythmEnergy === "medium")
+  ) {
     return "handheld_shake";
   }
   if (rhythmEnergy === "silent") {
@@ -877,7 +901,7 @@ function adaptStyleBlocks(
   tgtDur: number,
   minSeg: number,
   beatGrid: number[],
-  templateId?: string,
+  templateId?: string
 ): EditStyleInstruction[] {
   if (segments.length === 0) return [];
 
@@ -908,9 +932,7 @@ function adaptStyleBlocks(
     // beat onset that falls within this style block's time range.
     let blockOverlays: TemplateOverlayEffect[] | undefined;
     if (tplConfig && beatGrid.length > 0) {
-      const beatsInBlock = beatGrid.filter(
-        (bt) => bt >= start && bt <= end,
-      );
+      const beatsInBlock = beatGrid.filter((bt) => bt >= start && bt <= end);
       if (beatsInBlock.length > 0) {
         blockOverlays = beatsInBlock.map((bt) => ({
           time_sec: round3(bt),

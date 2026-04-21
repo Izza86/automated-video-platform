@@ -50,3 +50,7 @@ public/videos/*.mp4
 check-headers.js
 test-video-route.js
 pnpm-workspace.yaml
+
+scripts/style_transfer/output_ref/frames/
+videos/*.mp4
+*.json

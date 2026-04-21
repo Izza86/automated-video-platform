@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getUserSubscription, getUserUsage } from "@/server/subscriptions";
-import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { type NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { getUserSubscription, getUserUsage } from "@/server/subscriptions";
 
 export async function GET(req: NextRequest) {
   try {

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
 import { Menu, X } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import { useState } from "react";
 
 interface NavLinkProps {
   href: string;
@@ -17,38 +17,38 @@ export function LandingNavbar() {
 
   const NavLink = ({ href, className, children }: NavLinkProps) => (
     <Link
-      href={href}
       className={className}
-      prefetch={href?.startsWith("/") ?? false}
+      href={href}
       onClick={() => setOpen(false)}
+      prefetch={href?.startsWith("/") ?? false}
     >
       {children}
     </Link>
   );
 
   return (
-    <nav className="fixed top-0 left-0 w-full z-50 bg-[#1a1408]/90 backdrop-blur-sm border-b border-amber-700/50">
-      <div className="max-w-7xl mx-auto px-6 py-3 flex justify-between items-center">
+    <nav className="fixed top-0 left-0 z-50 w-full border-amber-700/50 border-b bg-[#1a1408]/90 backdrop-blur-sm">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
         {/* Logo */}
-        <NavLink href="/" className="flex items-center gap-4 group">
-          <div className="relative w-16 h-16 sm:w-20 sm:h-20">
+        <NavLink className="group flex items-center gap-4" href="/">
+          <div className="relative h-16 w-16 sm:h-20 sm:w-20">
             <Image
-              src="/logoimage.png"
               alt="Automated Video Editor Logo"
-              width={80}
+              className="h-full w-full object-contain"
               height={80}
-              className="w-full h-full object-contain"
               priority
+              src="/logoimage.png"
+              width={80}
             />
           </div>
-          <span className="text-lg sm:text-xl lg:text-2xl font-bold tracking-wide text-white group-hover:text-purple-400 transition-colors">
+          <span className="font-bold text-lg text-white tracking-wide transition-colors group-hover:text-purple-400 sm:text-xl lg:text-2xl">
             AUTOMATED VIDEO <span className="text-purple-400">EDITOR</span>
           </span>
         </NavLink>
 
         {/* Desktop Menu */}
         <div
-          className="hidden md:flex items-center space-x-6 relative"
+          className="relative hidden items-center space-x-6 md:flex"
           onMouseLeave={() => setHoveredIndex(null)}
         >
           {[
@@ -57,25 +57,25 @@ export function LandingNavbar() {
             { label: "About", href: "#about", idx: 2, size: "text-sm" },
           ].map((item) => (
             <a
-              key={item.idx}
+              className={`text-white/90 transition-all duration-300 hover:text-white ${item.size} relative z-10 px-4 py-2 font-medium`}
               href={item.href}
-              className={`text-white/90 hover:text-white transition-all duration-300 ${item.size} font-medium px-4 py-2 relative z-10`}
-              onMouseEnter={() => setHoveredIndex(item.idx)}
+              key={item.idx}
               onClick={() => setOpen(false)}
+              onMouseEnter={() => setHoveredIndex(item.idx)}
             >
               <span className="relative z-10">{item.label}</span>
               <span
-                className={`absolute inset-0 bg-gradient-to-r from-pink-500/30 via-pink-400/25 to-pink-500/30 rounded-lg blur-sm transition-all duration-300 ease-out ${hoveredIndex === item.idx ? "scale-110 opacity-100" : "scale-75 opacity-0"}`}
+                className={`absolute inset-0 rounded-lg bg-gradient-to-r from-pink-500/30 via-pink-400/25 to-pink-500/30 blur-sm transition-all duration-300 ease-out ${hoveredIndex === item.idx ? "scale-110 opacity-100" : "scale-75 opacity-0"}`}
               />
               <span
-                className={`absolute inset-0 bg-pink-500/15 rounded-lg transition-all duration-300 ease-out ${hoveredIndex === item.idx ? "scale-100 opacity-100" : "scale-75 opacity-0"}`}
+                className={`absolute inset-0 rounded-lg bg-pink-500/15 transition-all duration-300 ease-out ${hoveredIndex === item.idx ? "scale-100 opacity-100" : "scale-75 opacity-0"}`}
               />
             </a>
           ))}
 
           {/* Animated underline */}
           <span
-            className={`absolute bottom-0 h-0.5 bg-gradient-to-r from-purple-400 via-purple-500 to-purple-600 rounded-full transition-all duration-300 ease-out ${hoveredIndex !== null ? "opacity-100" : "opacity-0"}`}
+            className={`absolute bottom-0 h-0.5 rounded-full bg-gradient-to-r from-purple-400 via-purple-500 to-purple-600 transition-all duration-300 ease-out ${hoveredIndex !== null ? "opacity-100" : "opacity-0"}`}
             style={{
               width: hoveredIndex !== null ? "60px" : "0px",
               left:
@@ -91,34 +91,43 @@ export function LandingNavbar() {
           />
 
           <Link
+            className="ml-4 rounded-xl bg-purple-600 px-4 py-2 font-medium text-sm text-white shadow-lg shadow-purple-900/50 transition-all duration-300 hover:scale-105 hover:bg-purple-700 hover:shadow-purple-500/50 hover:shadow-xl"
             href="/login"
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-all duration-300 font-medium text-sm shadow-lg shadow-purple-900/50 hover:scale-105 hover:shadow-xl hover:shadow-purple-500/50 ml-4"
           >
             Login
           </Link>
         </div>
 
         {/* Mobile Menu Button */}
-        <button className="md:hidden text-white" onClick={() => setOpen(!open)}>
+        <button className="text-white md:hidden" onClick={() => setOpen(!open)}>
           {open ? <X size={24} /> : <Menu size={24} />}
         </button>
       </div>
 
       {/* Mobile Dropdown */}
       {open && (
-        <div className="md:hidden bg-[#1a1408]/90 backdrop-blur-sm px-4 py-4 space-y-4 border-t border-white/10">
-          <NavLink href="#features" className="block text-white/80 hover:text-white text-base">
+        <div className="space-y-4 border-white/10 border-t bg-[#1a1408]/90 px-4 py-4 backdrop-blur-sm md:hidden">
+          <NavLink
+            className="block text-base text-white/80 hover:text-white"
+            href="#features"
+          >
             Features
           </NavLink>
-          <NavLink href="#pricing" className="block text-white/80 hover:text-white text-base">
+          <NavLink
+            className="block text-base text-white/80 hover:text-white"
+            href="#pricing"
+          >
             Pricing
           </NavLink>
-          <NavLink href="#about" className="block text-white/80 hover:text-white text-base">
+          <NavLink
+            className="block text-base text-white/80 hover:text-white"
+            href="#about"
+          >
             About
           </NavLink>
           <Link
+            className="block w-full rounded-xl bg-purple-600 px-4 py-2 text-center text-base text-white transition hover:bg-purple-700"
             href="/login"
-            className="block w-full text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition text-base"
             onClick={() => setOpen(false)}
           >
             Login

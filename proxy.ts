@@ -27,7 +27,10 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/_next/static") ||
     pathname.match(/\.(jpg|jpeg|png|gif|svg|webp|ico|woff|woff2|ttf|eot)$/)
   ) {
-    response.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    response.headers.set(
+      "Cache-Control",
+      "public, max-age=31536000, immutable"
+    );
   }
 
   // ── 3. Manual login flow ─────────────────────────────────────────────────

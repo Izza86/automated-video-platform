@@ -13,12 +13,12 @@
 
 import type { FullVideoMetadata } from "../types";
 import type {
-  StyleDNA,
-  PacingDNA,
-  MotionDNA,
   ColorDNA,
   LightingDNA,
+  MotionDNA,
+  PacingDNA,
   RhythmDNA,
+  StyleDNA,
   TextureDNA,
 } from "../types/style-dna";
 
@@ -33,7 +33,14 @@ import type {
  * @returns        StyleDNA — semantic fingerprint across 6 perceptual domains
  */
 export function extractStyleDNA(refMeta: FullVideoMetadata): StyleDNA {
-  const { shotDetection: sd, motion: mo, audio: ab, colorGrading: cg, depth, duration } = refMeta;
+  const {
+    shotDetection: sd,
+    motion: mo,
+    audio: ab,
+    colorGrading: cg,
+    depth,
+    duration,
+  } = refMeta;
 
   return {
     sourceDuration: duration,
@@ -55,14 +62,14 @@ export function extractStyleDNA(refMeta: FullVideoMetadata): StyleDNA {
 function extractPacing(
   sd: FullVideoMetadata["shotDetection"],
   ab: FullVideoMetadata["audio"],
-  duration: number,
+  duration: number
 ): PacingDNA {
   const hardCuts = sd.cuts.filter((c) => c.type === "hard_cut");
   const gradualCuts = sd.cuts.filter(
     (c) =>
       c.type === "gradual_transition" &&
       c.transitionSubtype &&
-      c.transitionSubtype !== "unknown",
+      c.transitionSubtype !== "unknown"
   );
 
   // ── Cut density: hard cuts per second ──────────────────────────────
@@ -74,14 +81,17 @@ function extractPacing(
   for (const cut of hardCuts) {
     const nearestDist = beatOnsets.reduce(
       (best, t) => Math.min(best, Math.abs(t - cut.timestamp_sec)),
-      Infinity,
+      Number.POSITIVE_INFINITY
     );
     if (nearestDist <= 0.1) beatAlignedCuts++;
   }
-  const tempoAlignment = hardCuts.length > 0 ? beatAlignedCuts / hardCuts.length : 0;
+  const tempoAlignment =
+    hardCuts.length > 0 ? beatAlignedCuts / hardCuts.length : 0;
 
   // ── Shot length variance (std dev) ─────────────────────────────────
-  const allCuts = [...hardCuts].sort((a, b) => a.timestamp_sec - b.timestamp_sec);
+  const allCuts = [...hardCuts].sort(
+    (a, b) => a.timestamp_sec - b.timestamp_sec
+  );
   const shotLengths: number[] = [];
   let prev = 0;
   for (const cut of allCuts) {
@@ -97,7 +107,8 @@ function extractPacing(
   const shotLengthVariance =
     shotLengths.length > 1
       ? Math.sqrt(
-          shotLengths.reduce((a, b) => a + Math.pow(b - meanLen, 2), 0) / shotLengths.length,
+          shotLengths.reduce((a, b) => a + (b - meanLen) ** 2, 0) /
+            shotLengths.length
         )
       : 0;
 
@@ -108,11 +119,6 @@ function extractPacing(
     transitionProfile[subtype] = (transitionProfile[subtype] ?? 0) + 1;
   }
 
-  // ── Fallback pacing detection (v12 feature) ──────────────────────
-  // Track if fallback was needed (≤1 hard cuts detected)
-  const fallbackPacingTriggered = hardCuts.length <= 1;
-  const syntheticCutCount = fallbackPacingTriggered ? 0 : 0; // Will be populated during adaptation
-
   return {
     cutDensity,
     avgShotLen: sd.avgShotDurationSec,
@@ -122,8 +128,9 @@ function extractPacing(
     hardCutConfidences: hardCuts.map((c) => c.confidence).sort((a, b) => b - a),
     gradualTransitionCount: sd.gradualTransitionCount,
     transitionProfile,
-    fallbackPacingTriggered,
-    syntheticCutCount,
+    rawCutTimestamps: hardCuts
+      .map((c) => c.timestamp_sec)
+      .sort((a, b) => a - b),
     gradualTransitions: gradualCuts.map((c) => ({
       refTime: c.timestamp_sec,
       subtype: c.transitionSubtype ?? "unknown",
@@ -137,7 +144,7 @@ function extractPacing(
 
 function extractMotion(
   mo: FullVideoMetadata["motion"],
-  depth: FullVideoMetadata["depth"],
+  depth: FullVideoMetadata["depth"]
 ): MotionDNA {
   // ── Motion direction bias: mean panX/panY unit vector ───────────────
   const motionTl = mo.motionTimeline ?? [];
@@ -158,11 +165,14 @@ function extractMotion(
 
   // ── Motion spike detection (v12 fallback pacing feature) ──────────
   // Detect velocity peaks that indicate implicit cut moments
-  const velocities = (mo.velocityTimeline ?? []).map((v) => v.relative_speed ?? 0);
+  const velocities = (mo.velocityTimeline ?? []).map(
+    (v) => v.relative_speed ?? 0
+  );
   const sorted = [...velocities].sort((a, b) => a - b);
   const spikeThreshold = sorted[Math.floor(sorted.length * 0.75)] || 0;
   const motionSpikes = velocities.filter((v) => v > spikeThreshold * 1.5);
-  const motionSpikeFrequency = velocities.length > 0 ? motionSpikes.length / velocities.length : 0;
+  const motionSpikeFrequency =
+    velocities.length > 0 ? motionSpikes.length / velocities.length : 0;
   const hasMotionSpikes = motionSpikes.length > 0;
 
   return {
@@ -183,6 +193,12 @@ function extractMotion(
       relative_speed: v.relative_speed,
     })),
     zoomTimeline: mo.zoomTimeline ?? [],
+    cameraMotionTimeline: (mo.motionTimeline ?? []).map((m) => ({
+      time_sec: m.time_sec,
+      panX: m.camera.panX,
+      panY: m.camera.panY,
+      magnitude: m.camera.magnitude,
+    })),
   };
 }
 
@@ -197,7 +213,9 @@ function extractColor(cg: FullVideoMetadata["colorGrading"]): ColorDNA {
     histCdf.g?.length === 256 &&
     histCdf.b?.length === 256
   ) {
-    const masterCdf = histCdf.r.map((r, i) => (r + histCdf.g[i] + histCdf.b[i]) / 3);
+    const masterCdf = histCdf.r.map(
+      (r, i) => (r + histCdf.g[i] + histCdf.b[i]) / 3
+    );
     for (let i = 0; i <= 255; i += 8) {
       toneCurveSignature.push(Math.max(0, Math.min(1, masterCdf[i])));
     }
@@ -235,13 +253,15 @@ function extractLighting(cg: FullVideoMetadata["colorGrading"]): LightingDNA {
   let flickerAmplitude = 0.02;
   let exposureInertia = 0.82;
   let stochasticJitter = 0.08;
-  const exposureCurvePoints: Array<{ refTime: number; brightness: number }> = [];
+  const exposureCurvePoints: Array<{ refTime: number; brightness: number }> =
+    [];
 
   if (temporalSamples.length >= 2) {
     const brightnesses = temporalSamples.map((s) => s.brightness);
     const mean = brightnesses.reduce((a, b) => a + b, 0) / brightnesses.length;
     const variance =
-      brightnesses.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / brightnesses.length;
+      brightnesses.reduce((a, b) => a + (b - mean) ** 2, 0) /
+      brightnesses.length;
     const lumaStd = Math.sqrt(variance);
     const lumaRange = Math.max(...brightnesses) - Math.min(...brightnesses);
 
@@ -259,13 +279,15 @@ function extractLighting(cg: FullVideoMetadata["colorGrading"]): LightingDNA {
     for (let i = 1; i < brightnesses.length; i++) {
       deltas.push(Math.abs(brightnesses[i] - brightnesses[i - 1]));
     }
-    const meanDelta = deltas.length > 0 ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;
+    const meanDelta =
+      deltas.length > 0 ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;
     stochasticJitter = Math.max(0.02, Math.min(0.2, meanDelta * 1.5));
 
     // Smooth with inertia (EMA) to emulate camera auto-exposure adaptation
     let ema = brightnesses[0] ?? 0.5;
     for (const s of temporalSamples) {
-      ema = exposureInertia * ema + (1 - exposureInertia) * (s.brightness ?? ema);
+      ema =
+        exposureInertia * ema + (1 - exposureInertia) * (s.brightness ?? ema);
       exposureCurvePoints.push({ refTime: s.time_sec, brightness: ema });
     }
   }
@@ -277,9 +299,14 @@ function extractLighting(cg: FullVideoMetadata["colorGrading"]): LightingDNA {
   let shadowDepth = 0.5;
 
   if (histCdf && histCdf.r?.length === 256) {
-    const masterCdf = histCdf.r.map((r, i) => (r + histCdf.g[i] + histCdf.b[i]) / 3);
+    const masterCdf = histCdf.r.map(
+      (r, i) => (r + histCdf.g[i] + histCdf.b[i]) / 3
+    );
     // Rolloff: how much CDF rises from 0.75 to 1.0 range → higher = softer highlights
-    highlightRolloff = Math.min(1, Math.max(0, masterCdf[255] - masterCdf[192]));
+    highlightRolloff = Math.min(
+      1,
+      Math.max(0, masterCdf[255] - masterCdf[192])
+    );
     // Shadow depth: fraction of content below 0.25 brightness → higher = more shadows
     shadowDepth = Math.min(1, Math.max(0, 1 - masterCdf[64]));
   }
@@ -300,7 +327,7 @@ function extractLighting(cg: FullVideoMetadata["colorGrading"]): LightingDNA {
 
 function extractRhythm(
   ab: FullVideoMetadata["audio"],
-  sd: FullVideoMetadata["shotDetection"],
+  sd: FullVideoMetadata["shotDetection"]
 ): RhythmDNA {
   const beatEvents = ab.beatEvents ?? [];
 
@@ -336,11 +363,16 @@ function extractRhythm(
   const syncStrength = hardCuts.length > 0 ? syncAligned / hardCuts.length : 0;
 
   // ── Drop zones: beats with intensity ≥ 70% of peak ──────────────────
-  const peakIntensity = ab.peakBeatIntensity ?? Math.max(0, ...beatEvents.map((b) => b.intensity));
+  const peakIntensity =
+    ab.peakBeatIntensity ?? Math.max(0, ...beatEvents.map((b) => b.intensity));
   const dropThreshold = peakIntensity * 0.7;
   const dropZones = beatEvents
     .filter((b) => b.intensity >= dropThreshold)
-    .map((b) => ({ refTime: b.timestamp_sec, intensity: b.intensity, band: b.band }));
+    .map((b) => ({
+      refTime: b.timestamp_sec,
+      intensity: b.intensity,
+      band: b.band,
+    }));
 
   // Prompt 3: classify beats into cinematic intent classes
   const sortedFlux = [...beatEvents.map((b) => b.flux)].sort((a, b) => a - b);
@@ -356,7 +388,10 @@ function extractRhythm(
     const lowFreqEnergy = bandLowEnergy(b.band) * b.intensity;
     let cls: "hard_kick" | "snare" | "hi_hat" | "drop_moment" = "snare";
 
-    if (b.intensity >= 0.9 || (b.flux >= fluxThreshold && lowFreqEnergy > 0.55)) {
+    if (
+      b.intensity >= 0.9 ||
+      (b.flux >= fluxThreshold && lowFreqEnergy > 0.55)
+    ) {
       cls = "drop_moment";
     } else if (lowFreqEnergy > 0.5) {
       cls = "hard_kick";
@@ -403,7 +438,9 @@ function extractRhythm(
   };
 }
 
-function buildMoodSegments(cg: FullVideoMetadata["colorGrading"]): ColorDNA["moodSegments"] {
+function buildMoodSegments(
+  cg: FullVideoMetadata["colorGrading"]
+): ColorDNA["moodSegments"] {
   const samples = cg.temporalSamples ?? [];
   if (samples.length === 0) {
     return [
@@ -421,7 +458,10 @@ function buildMoodSegments(cg: FullVideoMetadata["colorGrading"]): ColorDNA["moo
     ];
   }
 
-  const segmentCount = Math.max(2, Math.min(4, Math.round(samples.length / 20) || 3));
+  const segmentCount = Math.max(
+    2,
+    Math.min(4, Math.round(samples.length / 20) || 3)
+  );
   const segLen = Math.ceil(samples.length / segmentCount);
   const segments: ColorDNA["moodSegments"] = [];
 
@@ -430,11 +470,14 @@ function buildMoodSegments(cg: FullVideoMetadata["colorGrading"]): ColorDNA["moo
     if (chunk.length === 0) continue;
     const start = chunk[0].time_sec;
     const end = chunk[chunk.length - 1].time_sec;
-    const meanBrightness = chunk.reduce((a, s) => a + s.brightness, 0) / chunk.length;
-    const meanContrast = chunk.reduce((a, s) => a + s.contrast, 0) / chunk.length;
+    const meanBrightness =
+      chunk.reduce((a, s) => a + s.brightness, 0) / chunk.length;
+    const meanContrast =
+      chunk.reduce((a, s) => a + s.contrast, 0) / chunk.length;
     const sats = chunk.map((s) => s.saturation);
     const satMean = sats.reduce((a, b) => a + b, 0) / sats.length;
-    const satVar = sats.reduce((a, b) => a + Math.pow(b - satMean, 2), 0) / sats.length;
+    const satVar =
+      sats.reduce((a, b) => a + (b - satMean) ** 2, 0) / sats.length;
 
     const labMean = {
       l: Math.max(0, Math.min(100, meanBrightness * 100)),
@@ -466,11 +509,17 @@ function extractTexture(cg: FullVideoMetadata["colorGrading"]): TextureDNA {
       refDuration: 1.0, // ~1 sample per second from signalstats
       blurLevel: s.blurLevel ?? 0,
       // v11 adaptive radius: blurLevel 0.15→1, 0.5→3, 1.0→5
-      radius: Math.max(1, Math.min(5, Math.round(1 + ((s.blurLevel ?? 0) - 0.15) * 4.7))),
+      radius: Math.max(
+        1,
+        Math.min(5, Math.round(1 + ((s.blurLevel ?? 0) - 0.15) * 4.7))
+      ),
     }));
 
   // ── Sharpness: reference level scaled to FFmpeg unsharp range (0–2) ──
-  const sharpnessProfile = Math.min(2.0, Math.max(0.3, (cg.sharpness || 1.0) * 0.7));
+  const sharpnessProfile = Math.min(
+    2.0,
+    Math.max(0.3, (cg.sharpness || 1.0) * 0.7)
+  );
 
   return {
     grainProfile: {

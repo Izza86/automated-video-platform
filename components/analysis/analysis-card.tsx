@@ -2,22 +2,22 @@
 
 import {
   Activity,
+  Fingerprint,
+  type LucideIcon,
   Music,
   Palette,
   Scissors,
-  Fingerprint,
-  type LucideIcon,
 } from "lucide-react";
+import { SparklineChart } from "@/components/analysis/sparkline-chart";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
+  CardAction,
+  CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
-  CardContent,
-  CardAction,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { SparklineChart } from "@/components/analysis/sparkline-chart";
 import type { DashboardCard } from "@/lib/types/analysis";
 import { cn } from "@/lib/utils";
 
@@ -67,7 +67,7 @@ const DEFAULT_META = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function mapBadgeVariant(
-  v?: string,
+  v?: string
 ): "default" | "secondary" | "destructive" | "outline" {
   switch (v) {
     case "success":
@@ -97,14 +97,14 @@ export function AnalysisCard({ card, className }: AnalysisCardProps) {
   return (
     <Card
       className={cn(
-        "bg-gradient-to-br from-[#141420] to-[#0c0c18] border-white/[0.06] hover:border-white/[0.12] transition-colors",
-        className,
+        "border-white/[0.06] bg-gradient-to-br from-[#141420] to-[#0c0c18] transition-colors hover:border-white/[0.12]",
+        className
       )}
     >
       <CardHeader>
         <div className="flex items-center gap-2">
           <Icon className={cn("h-5 w-5 shrink-0", meta.accent)} />
-          <CardTitle className="text-sm font-semibold text-white">
+          <CardTitle className="font-semibold text-sm text-white">
             {card.title}
           </CardTitle>
         </div>
@@ -115,37 +115,37 @@ export function AnalysisCard({ card, className }: AnalysisCardProps) {
             </Badge>
           </CardAction>
         )}
-        <CardDescription className="text-xs text-gray-500">
+        <CardDescription className="text-gray-500 text-xs">
           {card.subtitle}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-3">
         {/* Hero value */}
-        <p className="text-2xl font-bold tracking-tight text-white">
+        <p className="font-bold text-2xl text-white tracking-tight">
           {card.value}
         </p>
 
         {/* Sparkline (if data exists) */}
         {card.sparkline && card.sparkline.length >= 2 && (
           <SparklineChart
-            data={card.sparkline}
             color={meta.sparkColor}
-            height={56}
+            data={card.sparkline}
             gradientId={card.id}
+            height={56}
           />
         )}
 
         {/* Detail rows */}
         {card.details && card.details.length > 0 && (
-          <div className="space-y-1.5 pt-1 border-t border-white/5">
+          <div className="space-y-1.5 border-white/5 border-t pt-1">
             {card.details.map((d) => (
               <div
-                key={d.label}
                 className="flex items-center justify-between text-xs"
+                key={d.label}
               >
                 <span className="text-gray-500">{d.label}</span>
-                <span className="text-gray-300 font-medium">{d.value}</span>
+                <span className="font-medium text-gray-300">{d.value}</span>
               </div>
             ))}
           </div>

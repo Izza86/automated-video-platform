@@ -21,18 +21,18 @@
  */
 
 import type {
-  FullVideoMetadata,
-  ShotBoundary,
-  VelocitySegment,
-  JhatkaEvent,
   BeatEvent,
-  RhythmRegion,
-  ColorGradingResult,
   BlueprintEvent,
   BlueprintSegment,
   BlueprintStyleParams,
   BlueprintSummary,
+  ColorGradingResult,
   EditingBlueprint,
+  FullVideoMetadata,
+  JhatkaEvent,
+  RhythmRegion,
+  ShotBoundary,
+  VelocitySegment,
 } from "../types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ const CUT_MIN_CONFIDENCE = 0.15;
  */
 export function analyzeEditingPattern(
   meta: FullVideoMetadata,
-  filename = "video.mp4",
+  filename = "video.mp4"
 ): EditingBlueprint {
   const t0 = performance.now();
 
@@ -80,8 +80,8 @@ export function analyzeEditingPattern(
     ...buildBeatAlignedEvents(
       meta.audio.beatEvents,
       meta.shotDetection.cuts,
-      meta.motion.jhatkas,
-    ),
+      meta.motion.jhatkas
+    )
   );
 
   // 1d.  Rhythm-shift events (from rhythm region boundaries)
@@ -92,7 +92,7 @@ export function analyzeEditingPattern(
 
   // Sort chronologically, then by kind as tiebreaker
   events.sort(
-    (a, b) => a.time_sec - b.time_sec || a.kind.localeCompare(b.kind),
+    (a, b) => a.time_sec - b.time_sec || a.kind.localeCompare(b.kind)
   );
 
   // ── 2.  Build uniform-style segments ────────────────────────────────
@@ -192,7 +192,7 @@ function buildJhatkaEvents(jhatkas: JhatkaEvent[]): BlueprintEvent[] {
 function buildBeatAlignedEvents(
   beats: BeatEvent[],
   cuts: ShotBoundary[],
-  jhatkas: JhatkaEvent[],
+  jhatkas: JhatkaEvent[]
 ): BlueprintEvent[] {
   const events: BlueprintEvent[] = [];
 
@@ -206,7 +206,7 @@ function buildBeatAlignedEvents(
     // Find the nearest edit event to this beat
     const nearest = findNearest(
       editTimes.map((e) => e.t),
-      beat.timestamp_sec,
+      beat.timestamp_sec
     );
 
     if (nearest === null) continue;
@@ -270,7 +270,7 @@ function buildRhythmShiftEvents(regions: RhythmRegion[]): BlueprintEvent[] {
 /** Create a style keyframe event for the global colour grade. */
 function buildStyleKeyframe(
   cg: ColorGradingResult,
-  timeSec: number,
+  timeSec: number
 ): BlueprintEvent {
   return {
     time_sec: timeSec,
@@ -328,7 +328,9 @@ function buildSegments(meta: FullVideoMetadata): BlueprintSegment[] {
   const breakpoints = [...bpSet].sort((a, b) => a - b);
 
   // Beat times sorted for fast alignment check
-  const beatTimes = meta.audio.beatEvents.map((b) => b.timestamp_sec).sort((a, b) => a - b);
+  const beatTimes = meta.audio.beatEvents
+    .map((b) => b.timestamp_sec)
+    .sort((a, b) => a - b);
 
   const style = extractStyleParams(meta.colorGrading);
   const segments: BlueprintSegment[] = [];
@@ -343,17 +345,18 @@ function buildSegments(meta: FullVideoMetadata): BlueprintSegment[] {
     // Find the velocity segment covering this midpoint
     const vel = findCoveringVelocitySegment(
       meta.motion.velocitySegments,
-      midpoint,
+      midpoint
     );
 
     // Find the rhythm region covering this midpoint
-    const rhythm = findCoveringRhythmRegion(
-      meta.audio.rhythmRegions,
-      midpoint,
-    );
+    const rhythm = findCoveringRhythmRegion(meta.audio.rhythmRegions, midpoint);
 
     // Check if a beat aligns with segment start
-    const beatAligned = isNearBeat(beatTimes, start, BEAT_ALIGNMENT_TOLERANCE_SEC);
+    const beatAligned = isNearBeat(
+      beatTimes,
+      start,
+      BEAT_ALIGNMENT_TOLERANCE_SEC
+    );
 
     segments.push({
       start_sec: round3(start),
@@ -391,7 +394,7 @@ function extractStyleParams(cg: ColorGradingResult): BlueprintStyleParams {
 
 function buildSummary(
   meta: FullVideoMetadata,
-  events: BlueprintEvent[],
+  events: BlueprintEvent[]
 ): BlueprintSummary {
   return {
     totalDuration: meta.duration,
@@ -418,7 +421,7 @@ function buildSummary(
 /** Binary-search nearest value in a sorted number array. */
 function findNearest(
   sorted: number[],
-  target: number,
+  target: number
 ): { index: number; value: number } | null {
   if (sorted.length === 0) return null;
 
@@ -446,7 +449,7 @@ function findNearest(
 /** Find the velocity segment whose range covers the given time. */
 function findCoveringVelocitySegment(
   segments: VelocitySegment[],
-  t: number,
+  t: number
 ): VelocitySegment | undefined {
   return segments.find((s) => t >= s.start_sec && t < s.end_sec);
 }
@@ -454,7 +457,7 @@ function findCoveringVelocitySegment(
 /** Find the rhythm region whose range covers the given time. */
 function findCoveringRhythmRegion(
   regions: RhythmRegion[],
-  t: number,
+  t: number
 ): RhythmRegion | undefined {
   return regions.find((r) => t >= r.start_sec && t < r.end_sec);
 }
@@ -463,7 +466,7 @@ function findCoveringRhythmRegion(
 function isNearBeat(
   beatTimes: number[],
   t: number,
-  tolerance: number,
+  tolerance: number
 ): boolean {
   const nearest = findNearest(beatTimes, t);
   if (!nearest) return false;

@@ -1,15 +1,26 @@
 "use server";
 
 import { exec } from "child_process";
-import { promisify } from "util";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
+import { promisify } from "util";
+import type { VelocityTimelinePoint } from "./types/index";
+import {
+  assertRenderStyleDNA,
+  type RenderStyleDNA,
+} from "./types/render-style-dna";
+import { buildCurvesFilterFromCDF } from "./utils/cdf-curves-ffmpeg";
 
 const execAsync = promisify(exec);
 const writeFileAsync = promisify(fs.writeFile);
 const readFileAsync = promisify(fs.readFile);
 const unlinkAsync = promisify(fs.unlink);
+const DEBUG_MODE =
+  process.env.DEBUG_MODE === "1" ||
+  process.env.DEBUG_MODE === "true" ||
+  process.env.NEXT_PUBLIC_DEBUG_MODE === "1" ||
+  process.env.NEXT_PUBLIC_DEBUG_MODE === "true";
 
 // Log the PATH seen by the server process to aid debugging when ffmpeg isn't found
 console.log("Server process.env.PATH:", process.env.PATH);
@@ -23,9 +34,10 @@ async function resolveFfmpeg(): Promise<string> {
   if (process.env.FFMPEG_PATH) candidates.push(process.env.FFMPEG_PATH);
   // Try shell-resolved command first
   candidates.push("ffmpeg");
-  // Windows fallback (user requested)
+  // Removed hardcoded C: path — use PATH environment or FFMPEG_PATH instead
+  // This ensures compatibility with any drive (C:, D:, E:, etc.)
   if (process.platform === "win32") {
-    candidates.push("C:\\ffmpeg\\bin\\ffmpeg.exe");
+    // Windows users should set FFMPEG_PATH env var or have ffmpeg in PATH
   } else {
     // Common Unix locations
     candidates.push("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg");
@@ -35,7 +47,9 @@ async function resolveFfmpeg(): Promise<string> {
     if (!candidate) continue;
     try {
       // Quote paths that include spaces or backslashes
-      const cmd = /\\|\s/.test(candidate) ? `"${candidate}" -version` : `${candidate} -version`;
+      const cmd = /\\|\s/.test(candidate)
+        ? `"${candidate}" -version`
+        : `${candidate} -version`;
       await execAsync(cmd);
       console.log(`Using ffmpeg executable: ${candidate}`);
       return candidate;
@@ -70,16 +84,21 @@ export interface VideoMetadata {
   highlightsRgb: { r: number; g: number; b: number };
 
   // ── Grain & Texture ────────────────────────────────────────────────
-  grainDensity: number;   // 0-1
-  grainLabel: string;     // clean / light-grain / medium-grain / heavy-grain
+  grainDensity: number; // 0-1
+  grainLabel: string; // clean / light-grain / medium-grain / heavy-grain
 
   // ── Vignette & Lens Blur ───────────────────────────────────────────
   vignetteLabel: string;
-  lensBlur: number;       // 0-1
+  lensBlur: number; // 0-1
   lensBlurLabel: string;
 
   // ── Velocity / Speed Ramping ───────────────────────────────────────
-  velocitySegments: { start_sec: number; end_sec: number; relative_speed: number; label: string }[];
+  velocitySegments: {
+    start_sec: number;
+    end_sec: number;
+    relative_speed: number;
+    label: string;
+  }[];
   hasSpeedRamp: boolean;
   avgRelativeSpeed: number;
 
@@ -123,77 +142,6 @@ export async function bufferToBase64(buffer: Buffer): Promise<string> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// HALD CLUT — Deep Color Matching
-// ═══════════════════════════════════════════════════════════════════════════
-/**
- * Generate a HALD CLUT PNG from the reference video's color DNA.
- * A HALD CLUT is a 3D look-up table encoded as a square image.
- * Level 8 → 512×512 identity CLUT that we modify with color grading.
- *
- * We use FFmpeg to:
- *  1. Generate a level-8 identity HALD CLUT
- *  2. Apply the reference's colorbalance + colorchannelmixer + eq to that CLUT
- *  3. Save the result as a PNG file
- * The caller then applies it to the target with `haldclut`.
- */
-async function generateHaldClut(
-  outputPath: string,
-  safeExe: string,
-  meta: {
-    channelOffsets: { r: number; g: number; b: number };
-    shadowsRgb: { r: number; g: number; b: number };
-    highlightsRgb: { r: number; g: number; b: number };
-    brightness: number;
-    contrast: number;
-    saturation: number;
-  }
-): Promise<boolean> {
-  try {
-    const chOff = meta.channelOffsets;
-    const shadows = meta.shadowsRgb;
-    const highlights = meta.highlightsRgb;
-
-    const rr = (1 + chOff.r * 0.5).toFixed(3);
-    const gg = (1 + chOff.g * 0.5).toFixed(3);
-    const bb = (1 + chOff.b * 0.5).toFixed(3);
-
-    const toBalance = (v: number) => ((v - 128) / 128).toFixed(3);
-
-    // Build the filter chain that encodes the reference's entire color grade
-    const clutFilters: string[] = [];
-    if (Math.abs(chOff.r) > 0.01 || Math.abs(chOff.g) > 0.01 || Math.abs(chOff.b) > 0.01) {
-      clutFilters.push(`colorchannelmixer=rr=${rr}:gg=${gg}:bb=${bb}`);
-    }
-    clutFilters.push(
-      `colorbalance=rs=${toBalance(shadows.r)}:gs=${toBalance(shadows.g)}:bs=${toBalance(shadows.b)}` +
-      `:rh=${toBalance(highlights.r)}:gh=${toBalance(highlights.g)}:bh=${toBalance(highlights.b)}`
-    );
-    clutFilters.push(
-      `eq=brightness=${meta.brightness.toFixed(3)}:contrast=${meta.contrast.toFixed(3)}:saturation=${meta.saturation.toFixed(3)}`
-    );
-
-    const filterChain = clutFilters.join(",");
-
-    // Generate identity HALD CLUT level 8 (512×512) then grade it
-    const cmd = [
-      safeExe,
-      "-y",
-      `-f lavfi -i "haldclutsrc=level=8"`,
-      `-vf "${filterChain}"`,
-      `-frames:v 1`,
-      `"${outputPath}"`,
-    ].join(" ");
-
-    await execAsync(cmd, { maxBuffer: 30 * 1024 * 1024 });
-    console.log("[HALD CLUT] Generated:", outputPath);
-    return true;
-  } catch (err) {
-    console.warn("[HALD CLUT] Generation failed, falling back to eq filters:", err);
-    return false;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // VELOCITY ALIGNMENT — setpts for speed-matched segments
 // ═══════════════════════════════════════════════════════════════════════════
 /**
@@ -210,7 +158,11 @@ async function generateHaldClut(
  *   if(between(T, start, end), PTS * (1/speed), ...)
  */
 function buildSetptsExpr(
-  velocitySegments: { start_sec: number; end_sec: number; relative_speed: number }[],
+  velocitySegments: {
+    start_sec: number;
+    end_sec: number;
+    relative_speed: number;
+  }[],
   avgRelativeSpeed: number,
   targetDuration?: number
 ): string | null {
@@ -224,7 +176,7 @@ function buildSetptsExpr(
   // ── Loop / stretch velocity pattern to cover ENTIRE target ─────────
   // If the target video is longer than the reference's velocity map,
   // loop the pattern so every second gets the jhatkay treatment.
-  let segs = [...velocitySegments];
+  const segs = [...velocitySegments];
   const refEnd = segs.length > 0 ? Math.max(...segs.map((s) => s.end_sec)) : 0;
 
   if (targetDuration && targetDuration > refEnd && refEnd > 0) {
@@ -234,7 +186,8 @@ function buildSetptsExpr(
     let iter = 0;
     while (offset < targetDuration && iter < maxIterations) {
       for (const orig of velocitySegments) {
-        if (offset + (orig.end_sec - orig.start_sec) > targetDuration + 1) break;
+        if (offset + (orig.end_sec - orig.start_sec) > targetDuration + 1)
+          break;
         segs.push({
           start_sec: offset + orig.start_sec,
           end_sec: Math.min(offset + orig.end_sec, targetDuration),
@@ -244,7 +197,9 @@ function buildSetptsExpr(
       offset += patternLen;
       iter++;
     }
-    console.log(`[VELOCITY] Looped ${velocitySegments.length} segs → ${segs.length} segs to cover ${targetDuration.toFixed(1)}s target`);
+    console.log(
+      `[VELOCITY] Looped ${velocitySegments.length} segs → ${segs.length} segs to cover ${targetDuration.toFixed(1)}s target`
+    );
   }
 
   // ── Merge ONLY truly identical adjacent plateaus ───────────────────
@@ -294,7 +249,10 @@ function buildSetptsExpr(
     // Ease-in ramp from previous segment's speed into this one
     if (i > 0) {
       const prev = merged[i - 1];
-      const prevSpeed = Math.max(0.25, Math.min(4.0, prev.relative_speed || 1.0));
+      const prevSpeed = Math.max(
+        0.25,
+        Math.min(4.0, prev.relative_speed || 1.0)
+      );
       const prevFactor = (1 / prevSpeed).toFixed(4);
       const ramp = Math.min(RAMP_SEC, (s.end_sec - s.start_sec) * 0.3);
       if (Math.abs(prevSpeed - speed) >= 0.02 && ramp > 0.01) {
@@ -326,22 +284,258 @@ function buildAtempoChain(speed: number): string {
   return `atempo=${half.toFixed(4)},atempo=${half.toFixed(4)}`;
 }
 
+/** Resample motion timeline at shot-cut times so velocity segments respect editorial boundaries. */
+function resampleTimelineWithCuts(
+  timeline: VelocityTimelinePoint[],
+  cuts: Array<{ time_sec: number }>,
+  refDuration: number
+): VelocityTimelinePoint[] {
+  if (!timeline.length) return [];
+  const sorted = [...timeline].sort((a, b) => a.time_sec - b.time_sec);
+  const times = new Set<number>();
+  for (const p of sorted) times.add(p.time_sec);
+  for (const c of cuts) {
+    const t = c.time_sec;
+    if (t > 0.02 && t < refDuration - 0.02) times.add(t);
+  }
+  const ordered = [...times].sort((a, b) => a - b);
+  const nearest = (t: number): VelocityTimelinePoint => {
+    let best = sorted[0];
+    let d = Math.abs(best.time_sec - t);
+    for (const p of sorted) {
+      const d2 = Math.abs(p.time_sec - t);
+      if (d2 < d) {
+        d = d2;
+        best = p;
+      }
+    }
+    return { ...best, time_sec: t };
+  };
+  return ordered.map(nearest);
+}
+
+function timelineToVelocitySegments(
+  timeline: VelocityTimelinePoint[],
+  refDuration: number
+): { start_sec: number; end_sec: number; relative_speed: number }[] {
+  if (!timeline.length) return [];
+  const sorted = [...timeline].sort((a, b) => a.time_sec - b.time_sec);
+  const out: {
+    start_sec: number;
+    end_sec: number;
+    relative_speed: number;
+  }[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    const rs = sorted[i].relative_speed;
+    let j = i + 1;
+    while (
+      j < sorted.length &&
+      Math.abs(sorted[j].relative_speed - rs) < 0.025
+    ) {
+      j++;
+    }
+    const start = Math.max(0, sorted[i].time_sec);
+    const end =
+      j < sorted.length
+        ? sorted[j].time_sec
+        : Math.max(refDuration, start + 1e-3);
+    out.push({
+      start_sec: start,
+      end_sec: Math.min(end, refDuration),
+      relative_speed: Math.max(0.25, Math.min(4.0, rs || 1)),
+    });
+    i = j;
+  }
+  return out;
+}
+
+function isFilterGraphStatic(input: {
+  cutCount: number;
+  motionPoints: number;
+  beatCount: number;
+}): boolean {
+  return (
+    input.cutCount === 0 && input.motionPoints < 2 && input.beatCount === 0
+  );
+}
+
+function scaleCutTimesToTarget(
+  cuts: Array<{ time_sec: number; type: string }>,
+  refDuration: number,
+  targetDuration: number
+): number[] {
+  if (!(refDuration > 0 && targetDuration > 0)) return [];
+  return cuts
+    .filter((c) => c.type === "hard_cut")
+    .map((c) => (c.time_sec / refDuration) * targetDuration)
+    .filter((t) => t > 0.2 && t < targetDuration - 0.2)
+    .sort((a, b) => a - b);
+}
+
+function buildShotTrimConcatGraph(cutTimes: number[]): {
+  graph: string;
+  outputLabel: string;
+  segmentCount: number;
+} {
+  if (cutTimes.length === 0) {
+    return { graph: "", outputLabel: "vsrc", segmentCount: 1 };
+  }
+
+  const segments: Array<{ start: number; end: number }> = [];
+  let prev = 0;
+  for (const t of cutTimes) {
+    if (t > prev + 0.08) {
+      segments.push({ start: prev, end: t });
+      prev = t;
+    }
+  }
+  segments.push({ start: prev, end: Number.POSITIVE_INFINITY });
+
+  const trimParts: string[] = [];
+  const concatInputs: string[] = [];
+  let validSegments = 0;
+
+  for (const seg of segments) {
+    if (!(seg.end > seg.start)) continue;
+    const label = `seg${validSegments}`;
+    const endPart =
+      seg.end === Number.POSITIVE_INFINITY ? "" : `:end=${seg.end.toFixed(3)}`;
+    trimParts.push(
+      `[0:v]trim=start=${seg.start.toFixed(3)}${endPart},setpts=PTS-STARTPTS[${label}]`
+    );
+    concatInputs.push(`[${label}]`);
+    validSegments++;
+  }
+
+  if (validSegments <= 1) {
+    return { graph: "", outputLabel: "vsrc", segmentCount: 1 };
+  }
+
+  return {
+    graph:
+      `${trimParts.join(";")};` +
+      `${concatInputs.join("")}concat=n=${validSegments}:v=1:a=0[vcut]`,
+    outputLabel: "vcut",
+    segmentCount: validSegments,
+  };
+}
+
+function buildZoompanFromMotionTimeline(
+  timeline: VelocityTimelinePoint[]
+): string | null {
+  if (timeline.length < 2) return null;
+
+  const mags = timeline.map((p) => p.magnitude ?? 0).filter((v) => v >= 0);
+  const rel = timeline.map((p) => p.relative_speed ?? 1);
+  if (mags.length < 2 || rel.length < 2) return null;
+
+  const mean = (arr: number[]) =>
+    arr.reduce((a, b) => a + b, 0) / Math.max(1, arr.length);
+  const mMean = mean(mags);
+  const rMean = mean(rel);
+  const rVar = mean(rel.map((v) => (v - rMean) ** 2));
+  const motionEnergy = Math.min(1, Math.max(0, mMean / 20));
+  const jitter = Math.min(1, Math.max(0, Math.sqrt(rVar)));
+
+  const baseZoom = (1.0 + motionEnergy * 0.04).toFixed(4);
+  const amp = (0.004 + jitter * 0.02).toFixed(4);
+  const zx = (120 + Math.round(motionEnergy * 160)).toString();
+  const zy = (95 + Math.round(jitter * 110)).toString();
+
+  return `zoompan=z='${baseZoom}+${amp}*sin(on/${zx})':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`;
+}
+
+function sampleFrameTimestamps(timeline: number[], maxCount = 120): number[] {
+  if (timeline.length <= maxCount) return timeline;
+  const out: number[] = [];
+  const step = (timeline.length - 1) / (maxCount - 1);
+  for (let i = 0; i < maxCount; i++) {
+    const idx = Math.min(timeline.length - 1, Math.round(i * step));
+    out.push(timeline[idx]);
+  }
+  return out;
+}
+
+async function readFrameTimestamps(
+  ffprobeExe: string,
+  videoPath: string
+): Promise<number[]> {
+  const safeProbe = /\\|\s/.test(ffprobeExe) ? `"${ffprobeExe}"` : ffprobeExe;
+  const cmd = [
+    safeProbe,
+    `-i "${videoPath}"`,
+    "-select_streams v:0",
+    "-show_entries frame=pts_time",
+    "-of csv=p=0",
+    "-v error",
+  ].join(" ");
+  const { stdout } = await execAsync(cmd, { maxBuffer: 100 * 1024 * 1024 });
+  return stdout
+    .split(/\r?\n/)
+    .map((l) => Number.parseFloat(l.trim()))
+    .filter((n) => Number.isFinite(n));
+}
+
+async function exportDebugFrames(
+  ffmpegExe: string,
+  inputPath: string,
+  outDir: string
+): Promise<void> {
+  await fs.promises.mkdir(outDir, { recursive: true });
+  const safeExe = /\\|\s/.test(ffmpegExe) ? `"${ffmpegExe}"` : ffmpegExe;
+  const cmd = [
+    safeExe,
+    "-y",
+    `-i "${inputPath}"`,
+    `-vf "fps=1"`,
+    `"${path.join(outDir, "frame_%06d.jpg")}"`,
+  ].join(" ");
+  await execAsync(cmd, { maxBuffer: 100 * 1024 * 1024 });
+}
+
 /**
  * Process video with style applied (Buffer-based — avoids base64 overhead).
+ * Rendering is driven exclusively by `style_dna` from orchestrator analysis.
  */
 export async function processVideoFromBuffers(
   referenceBuffer: Buffer | null,
   targetBuffer: Buffer,
-  metadata: VideoMetadata,
-  options?: { keepOutput?: boolean }
+  options: {
+    style_dna: RenderStyleDNA;
+    keepOutput?: boolean;
+  }
 ): Promise<
-  | { success: true; metadata?: any; videoBase64?: string; outputPath?: string }
+  | {
+      success: true;
+      styleDNA?: RenderStyleDNA;
+      videoBase64?: string;
+      outputPath?: string;
+    }
   | { success: false; error: string }
 > {
-  const uploadDir = path.join(os.tmpdir(), `automated-video-uploads`);
+  const uploadDir = path.join(os.tmpdir(), "automated-video-uploads");
   const tempDir = path.join(uploadDir, `video-process-${Date.now()}`);
+  const debugRoot = path.join(process.cwd(), "debug");
+  const debugRefFramesDir = path.join(debugRoot, "ref_frames");
+  const debugOutputFramesDir = path.join(debugRoot, "output_frames");
+  const debugStyleDnaPath = path.join(debugRoot, "style_dna.json");
+  const debugComparePath = path.join(debugRoot, "frame_timestamp_compare.json");
 
   try {
+    assertRenderStyleDNA(options?.style_dna);
+    const style = options.style_dna;
+    if (DEBUG_MODE) {
+      await fs.promises.mkdir(debugRoot, { recursive: true });
+      await fs.promises.writeFile(
+        debugStyleDnaPath,
+        JSON.stringify(style, null, 2),
+        "utf-8"
+      );
+      console.log("[DEBUG_MODE] style_dna.json");
+      console.log(JSON.stringify(style, null, 2));
+    }
+
     // Create temp directory
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
@@ -362,20 +556,24 @@ export async function processVideoFromBuffers(
     const targetVideoPath = path.join(tempDir, "target.mp4");
     const outputVideoPath = path.join(tempDir, "output.mp4");
 
-    const referenceProvided = referenceBuffer !== null && referenceBuffer.length > 0;
+    const referenceProvided =
+      referenceBuffer !== null && referenceBuffer.length > 0;
     if (referenceProvided) {
       await writeFileAsync(referenceVideoPath, referenceBuffer);
     }
     await writeFileAsync(targetVideoPath, targetBuffer);
 
-    console.log("Videos written to temp files", { referenceVideoPath, targetVideoPath });
+    console.log("Videos written to temp files", {
+      referenceVideoPath,
+      targetVideoPath,
+    });
 
     // ── Resolve FFmpeg ───────────────────────────────────────────────────
     const ffmpegExe = await resolveFfmpeg();
     const safeExe = /\\|\s/.test(ffmpegExe) ? `"${ffmpegExe}"` : ffmpegExe;
 
-    // ── Probe target video for duration; probe reference for audio ───────
-    let targetDuration = metadata?.duration ?? 10;
+    // ── Probe target duration & reference audio (no client defaults) ─────
+    let targetDuration = 0;
     let refHasAudio = false;
     try {
       const ffprobeExe = await resolveFfprobe();
@@ -385,178 +583,140 @@ export async function processVideoFromBuffers(
         try {
           const refProbe = await probeFfprobe(referenceVideoPath, ffprobeExe);
           refHasAudio = refProbe.hasAudio;
-        } catch { /* assume no audio */ }
+        } catch {
+          /* assume no audio */
+        }
       }
     } catch {
-      console.warn("ffprobe unavailable, using metadata duration");
+      console.warn("ffprobe failed for target");
+    }
+    if (!(targetDuration > 0)) {
+      return {
+        success: false,
+        error:
+          "Could not determine target video duration — style_dna cannot be applied safely",
+      };
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    //  PRO CINEMATIC PIPELINE — CapCut / TikTok Grade
-    //  With: HALD CLUT deep color · setpts velocity · minterpolate 60fps
-    // ══════════════════════════════════════════════════════════════════════
-    const brightness     = metadata?.brightness ?? 0;
-    const contrast       = metadata?.contrast   ?? 1;
-    const saturation     = metadata?.saturation ?? 1;
-    const sharpness      = metadata?.sharpness  ?? 0;
-    const vignetteVal    = metadata?.vignette   ?? 0;
-    const chOff          = metadata?.channelOffsets ?? { r: 0, g: 0, b: 0 };
-    const shadows        = metadata?.shadowsRgb ?? { r: 40, g: 40, b: 50 };
-    const highlights     = metadata?.highlightsRgb ?? { r: 220, g: 220, b: 210 };
-    const grainDensity   = metadata?.grainDensity ?? 0;
-    const lensBlur       = metadata?.lensBlur ?? 0;
-    const motionIntensity = metadata?.motionIntensity ?? 0;
-    const isCinematic    = metadata?.isCinematic ?? false;
-    const firstBeatSec   = metadata?.audioBeatData?.firstBeatSec ?? 0;
-    const velocitySegs   = metadata?.velocitySegments ?? [];
-    const hasSpeedRamp   = metadata?.hasSpeedRamp ?? false;
-    const avgRelSpeed    = metadata?.avgRelativeSpeed ?? 1.0;
+    // ── Motion: cuts + motionTimeline → velocity segments → setpts ─────
+    const motionSource = resampleTimelineWithCuts(
+      style.motionTimeline,
+      style.cuts,
+      style.duration
+    );
+    const velocitySegs = timelineToVelocitySegments(
+      motionSource,
+      style.duration
+    );
+    let avgRelSpeed = 1.0;
+    if (velocitySegs.length > 0) {
+      avgRelSpeed =
+        velocitySegs.reduce((a, s) => a + s.relative_speed, 0) /
+        velocitySegs.length;
+    }
+    const setptsExpr = buildSetptsExpr(
+      velocitySegs,
+      avgRelSpeed,
+      targetDuration
+    );
 
-    // ─────────────────────────────────────────────────────────────────────
-    // 0. HALD CLUT — Deep Color Matching (master LUT from reference)
-    // ─────────────────────────────────────────────────────────────────────
-    const haldClutPath = path.join(tempDir, "hald_clut.png");
-    const useHaldClut = await generateHaldClut(haldClutPath, safeExe, {
-      channelOffsets: chOff,
-      shadowsRgb: shadows,
-      highlightsRgb: highlights,
-      brightness,
-      contrast,
-      saturation,
-    });
+    // ── Color: histogram CDF → curves (analysis only) ───────────────────
+    const curvesFilter = buildCurvesFilterFromCDF(style.colorCDF);
 
-    // ─────────────────────────────────────────────────────────────────────
-    // 1. Velocity Alignment — setpts expression from reference segments
-    // ─────────────────────────────────────────────────────────────────────
-    const setptsExpr = buildSetptsExpr(velocitySegs, avgRelSpeed, targetDuration);
+    // ── Cuts: style_dna.cuts → trim/select (hard cuts) ──────────────────
+    const scaledCuts = scaleCutTimesToTarget(
+      style.cuts,
+      style.duration,
+      targetDuration
+    );
+    const cutGraph = buildShotTrimConcatGraph(scaledCuts);
 
-    const vf: string[] = [];
-
-    // ── 1. De-noise ──────────────────────────────────────────────────────
-    vf.push("hqdn3d=4:3:6:4");
-
-    // ── 2. Velocity Alignment (setpts) — speed-match target to reference ─
-    if (setptsExpr) {
-      vf.push(`setpts=${setptsExpr}`);
+    // ── Beats: style_dna.beatTimestamps → sendcmd ───────────────────────
+    const beatCmdPath = path.join(tempDir, "beats.cmd");
+    const beatEvents = style.beatTimestamps
+      .map((t) =>
+        style.duration > 0 ? (t / style.duration) * targetDuration : t
+      )
+      .filter((t) => t >= 0 && t < targetDuration - 0.02)
+      .sort((a, b) => a - b);
+    const beatCmdLines: string[] = [];
+    for (const t of beatEvents) {
+      const start = t.toFixed(3);
+      const end = Math.min(targetDuration, t + 0.06).toFixed(3);
+      beatCmdLines.push(`${start} beat_eq brightness 0.035;`);
+      beatCmdLines.push(`${start} beat_eq contrast 1.055;`);
+      beatCmdLines.push(`${end} beat_eq brightness 0;`);
+      beatCmdLines.push(`${end} beat_eq contrast 1;`);
+    }
+    if (beatCmdLines.length > 0) {
+      await writeFileAsync(beatCmdPath, `${beatCmdLines.join("\n")}\n`);
     }
 
-    // ── 3. Pro-Scaling: every output = vertical TikTok/Reel 720×1280 ────
-    vf.push("scale=720:1280:force_original_aspect_ratio=increase");
-    vf.push("crop=720:1280");
+    const zoompanExpr = buildZoompanFromMotionTimeline(style.motionTimeline);
 
-    if (useHaldClut) {
-      // ── 4. Deep Color Match via HALD CLUT ─────────────────────────────
-      // The HALD CLUT already encodes colorchannelmixer + colorbalance + eq
-      // from the reference video, so we skip the individual color filters.
-      // The haldclut filter is applied as a second input in filter_complex.
+    if (
+      isFilterGraphStatic({
+        cutCount: scaledCuts.length,
+        motionPoints: style.motionTimeline.length,
+        beatCount: beatEvents.length,
+      })
+    ) {
+      return {
+        success: false,
+        error:
+          "[STRICT FAILURE] style_dna produced static filter graph input (no cuts, no motion timeline, no beats).",
+      };
+    }
+
+    const stageFilters: string[] = [];
+    if (setptsExpr) stageFilters.push(`setpts=${setptsExpr}`);
+    if (zoompanExpr) stageFilters.push(zoompanExpr);
+    stageFilters.push(curvesFilter);
+    if (beatCmdLines.length > 0) {
+      stageFilters.push(
+        `sendcmd=f='${beatCmdPath.replace(/\\/g, "/").replace(/:/g, "\\:")}'`
+      );
+      stageFilters.push("eq@beat_eq=brightness=0:contrast=1:saturation=1");
+    }
+    stageFilters.push("format=yuv420p");
+
+    const sourceLabel = cutGraph.outputLabel;
+    const filterGraphParts: string[] = [];
+    if (cutGraph.graph) {
+      filterGraphParts.push(cutGraph.graph);
+      filterGraphParts.push(`[${sourceLabel}]${stageFilters.join(",")}[vout]`);
     } else {
-      // ── 4-fallback. Manual Color DNA: colorchannelmixer + colorbalance + eq
-      const rr = (1 + chOff.r * 0.5).toFixed(3);
-      const gg = (1 + chOff.g * 0.5).toFixed(3);
-      const bb = (1 + chOff.b * 0.5).toFixed(3);
-      if (Math.abs(chOff.r) > 0.01 || Math.abs(chOff.g) > 0.01 || Math.abs(chOff.b) > 0.01) {
-        vf.push(`colorchannelmixer=rr=${rr}:gg=${gg}:bb=${bb}`);
-      }
-      const toBalance = (v: number) => ((v - 128) / 128).toFixed(3);
-      vf.push(
-        `colorbalance=rs=${toBalance(shadows.r)}:gs=${toBalance(shadows.g)}:bs=${toBalance(shadows.b)}` +
-        `:rh=${toBalance(highlights.r)}:gh=${toBalance(highlights.g)}:bh=${toBalance(highlights.b)}`
-      );
-      vf.push(
-        `eq=brightness=${brightness.toFixed(3)}:contrast=${contrast.toFixed(3)}:saturation=${saturation.toFixed(3)}`
-      );
+      filterGraphParts.push(`[0:v]${stageFilters.join(",")}[vout]`);
+    }
+    const filterComplex = filterGraphParts.join(";");
+
+    if (!filterComplex || filterComplex.trim().length === 0) {
+      return {
+        success: false,
+        error: "[STRICT FAILURE] filter_complex is empty.",
+      };
     }
 
-    // ── 5. Sharpness (unsharp mask) ─────────────────────────────────────
-    const sharpAmt = Math.max(0.3, Math.min(3.0, sharpness));
-    vf.push(`unsharp=5:5:${sharpAmt.toFixed(2)}:5:5:0.0`);
-
-    // ── 6. Cinematic Motion Blur (tblend) ───────────────────────────────
-    if (isCinematic || motionIntensity > 0.4) {
-      vf.push("tblend=all_mode=average");
+    console.log("[filter_complex] FULL GRAPH:");
+    console.log(filterComplex);
+    if (DEBUG_MODE) {
+      console.log("[DEBUG_MODE] filter_complex:");
+      console.log(filterComplex);
     }
 
-    // ── 7. Film Grain (noise filter) ────────────────────────────────────
-    const grainStrength = Math.round(grainDensity * 30);
-    if (grainStrength > 2) {
-      vf.push(`noise=c0s=${grainStrength}:c0f=t+u`);
-    }
+    const firstBeat =
+      style.beatTimestamps.length > 0 ? style.beatTimestamps[0] : 0;
+    const seekOffset = firstBeat > 0.05 ? firstBeat : 0;
 
-    // ── 8. Vignette ─────────────────────────────────────────────────────
-    if (vignetteVal > 0.02) {
-      const angle = (Math.PI / 2) * (1 - vignetteVal * 0.75);
-      vf.push(`vignette=angle=${angle.toFixed(4)}`);
-    }
+    const audioTempoFilter =
+      setptsExpr && avgRelSpeed > 0.01 ? buildAtempoChain(avgRelSpeed) : "";
 
-    // ── 9. Lens Blur ────────────────────────────────────────────────────
-    if (lensBlur > 0.15) {
-      const sigma = (lensBlur * 4).toFixed(1);
-      vf.push(`gblur=sigma=${sigma}`);
-    }
-
-    // ── 10. Transition Smoothing — minterpolate (60fps feel) ────────────
-    // Dynamic Interpolation based on video length to prevent RAM crashes:
-    //   ≤ 20s  → full mci mode (buttery 60fps, memory-heavy)
-    //   20-60s → blend mode (lightweight interpolation, still smooth)
-    //   > 60s  → disabled entirely (RAM safety for long videos)
-    const targetFps = metadata?.fps ?? 30;
-    const wantsMinterpolate =
-      (velocitySegs.length > 3 || hasSpeedRamp || isCinematic) && targetFps < 60;
-
-    if (wantsMinterpolate) {
-      if (targetDuration <= 20) {
-        // Short clip: full quality MCI mode — buttery smooth 60fps
-        vf.push("minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1");
-        console.log(`[MINTERPOLATE] MCI mode (${targetDuration.toFixed(1)}s ≤ 20s)`);
-      } else if (targetDuration <= 60) {
-        // Medium clip: lightweight blend mode — still smooth, much less RAM
-        vf.push("minterpolate=fps=60:mi_mode=blend");
-        console.log(`[MINTERPOLATE] Blend mode (${targetDuration.toFixed(1)}s ≤ 60s)`);
-      } else {
-        // Long clip: skip entirely to prevent OOM
-        console.warn(`[RAM SAFETY] Skipping minterpolate — video is ${targetDuration.toFixed(1)}s (>60s limit)`);
-      }
-    }
-
-    // ── 11. Fades — MINIMAL to preserve first-frame visibility ────────
-    //    No heavy initial fade-in — it hides the start-frame "jhatky".
-    //    Use 0.08s micro-fade to soften the hard splice, and a gentle
-    //    0.3s fade-out for clean finish.
-    const fadeInSec  = 0.08;
-    const fadeOutSec = 0.3;
-    const fadeOutStart = Math.max(0, targetDuration - fadeOutSec);
-    vf.push(`fade=t=in:st=0:d=${fadeInSec}`);
-    vf.push(`fade=t=out:st=${fadeOutStart.toFixed(2)}:d=${fadeOutSec}`);
-
-    // CRITICAL: format=yuv420p MUST be the absolute last filter.
-    // Without it, filters like haldclut or eq can output 4:4:4 which
-    // is incompatible with libx264 High profile → "high profile doesn't
-    // support 4:4:4" error. Placing it last guarantees 4:2:0 output.
-    vf.push("format=yuv420p");
-
-    const videoFilterChain = vf.join(",");
-
-    // ── Audio Beat Sync — seek to first beat for alignment ──────────────
-    const seekOffset = firstBeatSec > 0.05 ? firstBeatSec : 0;
-
-    // Audio tempo correction when setpts changes speed
-    const audioTempoFilter = setptsExpr && avgRelSpeed > 0.01
-      ? buildAtempoChain(avgRelSpeed)
-      : "";
-
-    // Dynamic CRF: short clips get premium quality (18), longer videos
-    // get slightly lower quality (20) to keep file sizes manageable.
     const dynamicCrf = targetDuration > 30 ? 20 : 18;
 
     console.log(
-      `[PRO] brightness=${brightness.toFixed(3)} contrast=${contrast.toFixed(3)} sat=${saturation.toFixed(3)} sharp=${sharpAmt.toFixed(2)} vignette=${vignetteVal.toFixed(3)} ` +
-      `haldClut=${useHaldClut} grain=${grainStrength} lensBlur=${lensBlur.toFixed(2)} motionBlur=${isCinematic || motionIntensity > 0.4} ` +
-      `minterpolate=${wantsMinterpolate} dur=${targetDuration.toFixed(1)}s crf=${dynamicCrf} setpts=${!!setptsExpr} avgSpeed=${avgRelSpeed.toFixed(2)} beatSync=${seekOffset.toFixed(3)}s`
+      `[style_dna] cuts=${style.cuts.length} motionPts=${style.motionTimeline.length} beats=${style.beatTimestamps.length} refDur=${style.duration.toFixed(2)}s targetDur=${targetDuration.toFixed(2)}s setpts=${Boolean(setptsExpr)} zoompan=${Boolean(zoompanExpr)} beatCmd=${beatEvents.length} segments=${cutGraph.segmentCount} avgSpeed=${avgRelSpeed.toFixed(3)}`
     );
 
-    // ══════════════════════════════════════════════════════════════════════
-    //  BUILD FFmpeg COMMAND
-    // ══════════════════════════════════════════════════════════════════════
     let ffmpegCmd: string;
 
     const encoderFlags = `-c:v libx264 -profile:v high -pix_fmt yuv420p -preset ultrafast -cpu-used 4 -crf ${dynamicCrf} -threads 0`;
@@ -564,95 +724,51 @@ export async function processVideoFromBuffers(
     if (referenceProvided && refHasAudio) {
       const seekFlag = seekOffset > 0.05 ? `-ss ${seekOffset.toFixed(3)}` : "";
 
-      // Build audio processing chain
-      // -stream_loop -1 on the reference input ensures the audio repeats
-      // Enforce strict duration with -t, loop audio, trim & sync
       const audioFilters: string[] = [];
-      // Loop audio infinitely, then trim to target duration
       audioFilters.push("aloop=loop=-1:size=2e9");
       audioFilters.push(`atrim=0:${targetDuration.toFixed(3)}`);
       audioFilters.push("asetpts=PTS-STARTPTS");
       if (audioTempoFilter) audioFilters.push(audioTempoFilter);
-      // Fade-in/out at the precise end of the target video duration
-      audioFilters.push(`afade=t=in:st=0:d=${fadeInSec}`);
-      audioFilters.push(`afade=t=out:st=${Math.max(0, targetDuration - fadeOutSec).toFixed(3)}:d=${fadeOutSec}`);
       const audioChain = `[1:a]${audioFilters.join(",")}[aout]`;
 
-      // Enforce strict duration for output
       const durationFlag = `-t ${targetDuration.toFixed(3)}`;
 
-      if (useHaldClut) {
-        // HALD CLUT path: 3 inputs (target, reference, clut)
-        ffmpegCmd = [
-          safeExe,
-          "-y",
-          seekFlag,
-          durationFlag,
-          `-i "${targetVideoPath}"`,
-          `-stream_loop -1 -i "${referenceVideoPath}"`,
-          `-i "${haldClutPath}"`,
-          `-filter_complex "[0:v]${videoFilterChain}[graded];[graded][2:v]haldclut,format=yuv420p[vout];${audioChain}"`,
-          `-map "[vout]" -map "[aout]"`,
-          encoderFlags,
-          `-c:a aac -b:a 192k`,
-          `-movflags +faststart`,
-          `"${outputVideoPath}"`,
-        ].join(" ");
-      } else {
-        // Standard path: 2 inputs (target, reference)
-        ffmpegCmd = [
-          safeExe,
-          "-y",
-          seekFlag,
-          durationFlag,
-          `-i "${targetVideoPath}"`,
-          `-stream_loop -1 -i "${referenceVideoPath}"`,
-          `-filter_complex "[0:v]${videoFilterChain}[vout];${audioChain}"`,
-          `-map "[vout]" -map "[aout]"`,
-          encoderFlags,
-          `-c:a aac -b:a 192k`,
-          `-movflags +faststart`,
-          `"${outputVideoPath}"`,
-        ].join(" ");
-      }
+      ffmpegCmd = [
+        safeExe,
+        "-y",
+        seekFlag,
+        durationFlag,
+        `-i "${targetVideoPath}"`,
+        `-stream_loop -1 -i "${referenceVideoPath}"`,
+        `-filter_complex "${filterComplex};${audioChain}"`,
+        `-map "[vout]" -map "[aout]"`,
+        encoderFlags,
+        "-c:a aac -b:a 192k",
+        "-movflags +faststart",
+        `"${outputVideoPath}"`,
+      ].join(" ");
     } else {
-      // No reference audio — keep target's own audio (if any)
       const seekFlag2 = seekOffset > 0.05 ? `-ss ${seekOffset.toFixed(3)}` : "";
 
-      if (useHaldClut) {
-        // HALD CLUT path without reference audio
-        const audioMap = audioTempoFilter
-          ? `-filter_complex "[0:v]${videoFilterChain}[graded];[graded][1:v]haldclut,format=yuv420p[vout]" -map "[vout]" -map 0:a?`
-          : `-filter_complex "[0:v]${videoFilterChain}[graded];[graded][1:v]haldclut,format=yuv420p[vout]" -map "[vout]" -map 0:a?`;
-        ffmpegCmd = [
-          safeExe,
-          "-y",
-          seekFlag2,
-          `-i "${targetVideoPath}"`,
-          `-i "${haldClutPath}"`,
-          audioMap,
-          encoderFlags,
-          `-c:a copy`,
-          `-movflags +faststart`,
-          `"${outputVideoPath}"`,
-        ].join(" ");
-      } else {
-        ffmpegCmd = [
-          safeExe,
-          "-y",
-          seekFlag2,
-          `-i "${targetVideoPath}"`,
-          `-filter_complex "[0:v]${videoFilterChain}[vout]"`,
-          `-map "[vout]" -map 0:a?`,
-          encoderFlags,
-          `-c:a copy`,
-          `-movflags +faststart`,
-          `"${outputVideoPath}"`,
-        ].join(" ");
-      }
+      ffmpegCmd = [
+        safeExe,
+        "-y",
+        seekFlag2,
+        `-i "${targetVideoPath}"`,
+        `-filter_complex "${filterComplex}"`,
+        `-map "[vout]" -map 0:a?`,
+        encoderFlags,
+        "-c:a copy",
+        "-movflags +faststart",
+        `"${outputVideoPath}"`,
+      ].join(" ");
     }
 
     console.log("FFmpeg command:", ffmpegCmd);
+    if (DEBUG_MODE) {
+      console.log("[DEBUG_MODE] ffmpeg command:");
+      console.log(ffmpegCmd);
+    }
 
     const startTime = Date.now();
     try {
@@ -661,17 +777,80 @@ export async function processVideoFromBuffers(
       console.error("FFmpeg failed:", ffErr?.stderr || ffErr);
       const msg =
         ffErr && (ffErr.stderr || ffErr.message)
-          ? (ffErr.stderr || ffErr.message)
+          ? ffErr.stderr || ffErr.message
           : String(ffErr);
       return { success: false, error: `FFmpeg processing failed: ${msg}` };
     }
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`FFmpeg processing completed in ${elapsed}s`);
 
+    if (DEBUG_MODE) {
+      try {
+        const ffprobeExe = await resolveFfprobe();
+        if (referenceProvided) {
+          await exportDebugFrames(
+            ffmpegExe,
+            referenceVideoPath,
+            debugRefFramesDir
+          );
+        }
+        await exportDebugFrames(
+          ffmpegExe,
+          outputVideoPath,
+          debugOutputFramesDir
+        );
+
+        const refTs = referenceProvided
+          ? await readFrameTimestamps(ffprobeExe, referenceVideoPath)
+          : [];
+        const outTs = await readFrameTimestamps(ffprobeExe, outputVideoPath);
+        const refSample = sampleFrameTimestamps(refTs);
+        const outSample = sampleFrameTimestamps(outTs);
+        const pairCount = Math.min(refSample.length, outSample.length);
+        const pairs: Array<{
+          idx: number;
+          ref: number;
+          output: number;
+          delta: number;
+        }> = [];
+        for (let i = 0; i < pairCount; i++) {
+          const delta = outSample[i] - refSample[i];
+          pairs.push({
+            idx: i,
+            ref: Number(refSample[i].toFixed(4)),
+            output: Number(outSample[i].toFixed(4)),
+            delta: Number(delta.toFixed(4)),
+          });
+        }
+        await fs.promises.writeFile(
+          debugComparePath,
+          JSON.stringify(
+            {
+              generatedAt: new Date().toISOString(),
+              referenceFrameCount: refTs.length,
+              outputFrameCount: outTs.length,
+              sampledPairs: pairs,
+            },
+            null,
+            2
+          ),
+          "utf-8"
+        );
+        console.log("[DEBUG_MODE] Saved debug artifacts:", {
+          debugStyleDnaPath,
+          debugRefFramesDir,
+          debugOutputFramesDir,
+          debugComparePath,
+        });
+      } catch (debugErr) {
+        console.error("[DEBUG_MODE] artifact generation failed:", debugErr);
+      }
+    }
+
     // ── Return result ────────────────────────────────────────────────────
     if (options && options.keepOutput) {
       console.log(`Output video written to: ${outputVideoPath}`);
-      return { success: true, metadata, outputPath: outputVideoPath };
+      return { success: true, styleDNA: style, outputPath: outputVideoPath };
     }
 
     const outputBuffer = await readFileAsync(outputVideoPath);
@@ -679,19 +858,23 @@ export async function processVideoFromBuffers(
 
     console.log(`Output video size: ${outputBuffer.length} bytes`);
 
-    return { success: true, metadata, videoBase64: outputBase64 };
+    return { success: true, styleDNA: style, videoBase64: outputBase64 };
   } catch (error) {
     console.error("Video processing error:", error);
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
-   // Check if it's an FFmpeg not found error
-   if (errorMessage.includes("ffmpeg") || errorMessage.includes("not found")) {
-     return {
-       success: false,
-       error: "FFmpeg is not installed. Please install FFmpeg to use video processing. Visit: https://ffmpeg.org/download.html",
-     };
-   }
-   return { success: false, error: `Video processing failed: ${errorMessage}` };
+    // Check if it's an FFmpeg not found error
+    if (errorMessage.includes("ffmpeg") || errorMessage.includes("not found")) {
+      return {
+        success: false,
+        error:
+          "FFmpeg is not installed. Please install FFmpeg to use video processing. Visit: https://ffmpeg.org/download.html",
+      };
+    }
+    return {
+      success: false,
+      error: `Video processing failed: ${errorMessage}`,
+    };
   } finally {
     // ── Robust Temp Cleanup ─────────────────────────────────────────────
     // Always clean up temp files (.png, .mp4, .json) even on errors.
@@ -701,10 +884,14 @@ export async function processVideoFromBuffers(
       console.log("[CLEANUP] keepOutput=true — cleaning intermediates only");
       try {
         // Delete intermediate files but keep output.mp4
-        const intermediates = ["reference.mp4", "target.mp4", "hald_clut.png"];
+        const intermediates = ["reference.mp4", "target.mp4"];
         for (const f of intermediates) {
           const fp = path.join(tempDir, f);
-          try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch { /* ignore */ }
+          try {
+            if (fs.existsSync(fp)) fs.unlinkSync(fp);
+          } catch {
+            /* ignore */
+          }
         }
       } catch (e) {
         console.warn("[CLEANUP] intermediate cleanup error:", e);
@@ -727,7 +914,8 @@ export async function processVideoFromBuffers(
       const staleThreshold = 30 * 60 * 1000; // 30 minutes
       const entries = fs.readdirSync(uploadDir, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isDirectory() || !entry.name.startsWith("video-process-")) continue;
+        if (!(entry.isDirectory() && entry.name.startsWith("video-process-")))
+          continue;
         const dirPath = path.join(uploadDir, entry.name);
         try {
           const stat = fs.statSync(dirPath);
@@ -735,9 +923,13 @@ export async function processVideoFromBuffers(
             fs.rmSync(dirPath, { recursive: true, force: true });
             console.log(`[CLEANUP] Removed stale temp: ${entry.name}`);
           }
-        } catch { /* skip inaccessible dirs */ }
+        } catch {
+          /* skip inaccessible dirs */
+        }
       }
-    } catch { /* uploadDir may not exist yet */ }
+    } catch {
+      /* uploadDir may not exist yet */
+    }
   }
 }
 
@@ -747,17 +939,25 @@ export async function processVideoFromBuffers(
 export async function processVideoWithStyle(
   referenceVideoBase64: string,
   targetVideoBase64: string,
-  metadata: VideoMetadata,
+  style_dna: RenderStyleDNA,
   options?: { keepOutput?: boolean }
 ): Promise<
-  | { success: true; metadata?: any; videoBase64?: string; outputPath?: string }
+  | {
+      success: true;
+      styleDNA?: RenderStyleDNA;
+      videoBase64?: string;
+      outputPath?: string;
+    }
   | { success: false; error: string }
 > {
   const refBuf = referenceVideoBase64
     ? await base64ToBuffer(referenceVideoBase64)
     : null;
   const tgtBuf = await base64ToBuffer(targetVideoBase64);
-  return processVideoFromBuffers(refBuf, tgtBuf, metadata, options);
+  return processVideoFromBuffers(refBuf, tgtBuf, {
+    style_dna,
+    keepOutput: options?.keepOutput,
+  });
 }
 
 /**
@@ -775,7 +975,12 @@ export async function extractVideoMetadataFromBuffer(
     await writeFileAsync(videoPath, videoBuffer);
 
     // ── Step 1: ffprobe → fps, aspect ratio, audio, duration ─────────
-    let ffprobeData = { fps: 30, aspectRatio: "16:9", hasAudio: false, duration: 10 };
+    let ffprobeData = {
+      fps: 30,
+      aspectRatio: "16:9",
+      hasAudio: false,
+      duration: 10,
+    };
     const ffprobeExe = await resolveFfprobe();
     ffprobeData = await probeFfprobe(videoPath, ffprobeExe);
     console.log("ffprobe data:", ffprobeData);
@@ -785,14 +990,22 @@ export async function extractVideoMetadataFromBuffer(
     const safeExe = /\\|\s/.test(ffmpegExe) ? `"${ffmpegExe}"` : ffmpegExe;
     const { brightness, contrast, saturation, sharpness, vignette } =
       await analyzeWithFfmpeg(videoPath, safeExe);
-    console.log("FFmpeg analysis:", { brightness, contrast, saturation, sharpness, vignette });
+    console.log("FFmpeg analysis:", {
+      brightness,
+      contrast,
+      saturation,
+      sharpness,
+      vignette,
+    });
 
     // ── Step 3: volumedetect → audio volume ──────────────────────────
     let audioVolume = 0.8;
     if (ffprobeData.hasAudio) {
       try {
         audioVolume = await detectAudioVolume(videoPath, ffmpegExe);
-      } catch { /* optional */ }
+      } catch {
+        /* optional */
+      }
     }
 
     // ── Derive high-level labels ──────────────────────────────────────
@@ -800,28 +1013,38 @@ export async function extractVideoMetadataFromBuffer(
     if (brightness < -0.15 && saturation < 0.8) colorProfile = "dark";
     else if (brightness > 0.15 && saturation > 1.4) colorProfile = "bright";
     else if (saturation < 0.6) colorProfile = "muted";
-    else if (saturation > 1.4) colorProfile = "vivid";
+    else if (saturation > 1.4) colorProfile = "vibrant";
 
     const transitionStyle = "fade";
     const isCinematic = ffprobeData.fps >= 23 && ffprobeData.fps <= 25;
-    const orient = (() => { const [w, h] = ffprobeData.aspectRatio.split(":").map(Number); const r = (w || 16) / (h || 9); return r > 1.2 ? "horizontal" : r < 0.8 ? "vertical" : "square"; })();
+    const orient = (() => {
+      const [w, h] = ffprobeData.aspectRatio.split(":").map(Number);
+      const r = (w || 16) / (h || 9);
+      return r > 1.2 ? "horizontal" : r < 0.8 ? "vertical" : "square";
+    })();
 
     return {
-      colorProfile, brightness, contrast, saturation, sharpness, vignette,
+      colorProfile,
+      brightness,
+      contrast,
+      saturation,
+      sharpness,
+      vignette,
       aspectRatio: ffprobeData.aspectRatio,
       fps: ffprobeData.fps,
       hasAudio: ffprobeData.hasAudio,
       audioVolume,
       duration: ffprobeData.duration > 0 ? ffprobeData.duration : 10,
       transitionStyle,
-      colorMood: "neutral",
+      colorMood: colorProfile,
       channelOffsets: { r: 0, g: 0, b: 0 },
       shadowsRgb: { r: 40, g: 40, b: 50 },
       midtonesRgb: { r: 128, g: 128, b: 128 },
       highlightsRgb: { r: 220, g: 220, b: 210 },
       grainDensity: 0.15,
       grainLabel: "light-grain",
-      vignetteLabel: vignette > 0.15 ? "medium" : vignette > 0.05 ? "light" : "none",
+      vignetteLabel:
+        vignette > 0.15 ? "medium" : vignette > 0.05 ? "light" : "none",
       lensBlur: 0.1,
       lensBlurLabel: "none",
       velocitySegments: [],
@@ -836,9 +1059,16 @@ export async function extractVideoMetadataFromBuffer(
     };
   } catch (error) {
     console.error("Error extracting metadata from buffer:", error);
-    return { ...DEFAULT_METADATA };
+    throw new Error(
+      "[STRICT FAILURE] Video metadata extraction failed. Default metadata is disabled."
+    );
   } finally {
-    try { if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try {
+      if (fs.existsSync(tempDir))
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -850,7 +1080,13 @@ export async function extractVideoMetadataFromBuffer(
 async function analyzeWithFfmpeg(
   videoPath: string,
   safeExe: string
-): Promise<{ brightness: number; contrast: number; saturation: number; sharpness: number; vignette: number }> {
+): Promise<{
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  sharpness: number;
+  vignette: number;
+}> {
   // signalstats outputs per-frame YAVG (luma avg), YLOW, YHIGH, SATAVG, etc.
   // We sample the first 5 seconds for speed.
   try {
@@ -858,25 +1094,32 @@ async function analyzeWithFfmpeg(
       safeExe,
       `-t 5 -i "${videoPath}"`,
       `-vf "signalstats=stat=tout+vrep+brng,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
     const { stderr } = await execAsync(cmd, { maxBuffer: 30 * 1024 * 1024 });
 
     // Parse YAVG (0-255 luma), SATAVG (0-~182 saturation), YHIGH/YLOW for contrast
-    const yavgMatches = stderr.match(/lavfi\.signalstats\.YAVG=(\d+\.?\d*)/g) ?? [];
-    const satMatches  = stderr.match(/lavfi\.signalstats\.SATAVG=(\d+\.?\d*)/g) ?? [];
-    const ylowMatches = stderr.match(/lavfi\.signalstats\.YLOW=(\d+\.?\d*)/g) ?? [];
-    const yhighMatches = stderr.match(/lavfi\.signalstats\.YHIGH=(\d+\.?\d*)/g) ?? [];
+    const yavgMatches =
+      stderr.match(/lavfi\.signalstats\.YAVG=(\d+\.?\d*)/g) ?? [];
+    const satMatches =
+      stderr.match(/lavfi\.signalstats\.SATAVG=(\d+\.?\d*)/g) ?? [];
+    const ylowMatches =
+      stderr.match(/lavfi\.signalstats\.YLOW=(\d+\.?\d*)/g) ?? [];
+    const yhighMatches =
+      stderr.match(/lavfi\.signalstats\.YHIGH=(\d+\.?\d*)/g) ?? [];
 
     const parseVals = (matches: string[]) =>
-      matches.map((m) => parseFloat(m.split("=")[1])).filter((v) => !isNaN(v));
+      matches
+        .map((m) => Number.parseFloat(m.split("=")[1]))
+        .filter((v) => !isNaN(v));
 
     const yavgVals = parseVals(yavgMatches);
-    const satVals  = parseVals(satMatches);
+    const satVals = parseVals(satMatches);
     const ylowVals = parseVals(ylowMatches);
     const yhighVals = parseVals(yhighMatches);
 
-    const mean = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    const mean = (arr: number[]) =>
+      arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 
     // Brightness: map YAVG (0-255) → ffmpeg eq range [-1, 1], where 128 ≈ 0
     const avgLuma = mean(yavgVals) || 128;
@@ -885,7 +1128,7 @@ async function analyzeWithFfmpeg(
     // Contrast: ratio of dynamic range (YHIGH - YLOW) relative to 128.
     // High dynamic range → high contrast; 128 span → 1.0x
     const avgHigh = mean(yhighVals) || 200;
-    const avgLow  = mean(ylowVals) || 16;
+    const avgLow = mean(ylowVals) || 16;
     const dynamicRange = avgHigh - avgLow;
     const contrast = Math.max(0.3, Math.min(3.0, dynamicRange / 128));
 
@@ -901,11 +1144,15 @@ async function analyzeWithFfmpeg(
         safeExe,
         `-t 3 -i "${videoPath}"`,
         `-vf "select=not(mod(n\\,15)),blurdetect"`,
-        `-f null -`,
+        "-f null -",
       ].join(" ");
-      const { stderr: sharpStderr } = await execAsync(sharpCmd, { maxBuffer: 10 * 1024 * 1024 });
+      const { stderr: sharpStderr } = await execAsync(sharpCmd, {
+        maxBuffer: 10 * 1024 * 1024,
+      });
       const blurMatches = sharpStderr.match(/blur=(\d+\.?\d*)/g) ?? [];
-      const blurVals = blurMatches.map((m) => parseFloat(m.split("=")[1])).filter((v) => !isNaN(v));
+      const blurVals = blurMatches
+        .map((m) => Number.parseFloat(m.split("=")[1]))
+        .filter((v) => !isNaN(v));
       if (blurVals.length > 0) {
         const avgBlur = mean(blurVals);
         // blur 0 = perfectly sharp → sharpness 3.0; blur 1 = very blurry → sharpness ~0
@@ -923,24 +1170,35 @@ async function analyzeWithFfmpeg(
     try {
       // Centre 40% crop
       const centreCmd = `${safeExe} -t 3 -i "${videoPath}" -vf "crop=iw*0.4:ih*0.4:iw*0.3:ih*0.3,signalstats,metadata=print:file=-" -f null -`;
-      const { stderr: centreStderr } = await execAsync(centreCmd, { maxBuffer: 10 * 1024 * 1024 });
-      const centreYavg = parseVals(centreStderr.match(/lavfi\.signalstats\.YAVG=(\d+\.?\d*)/g) ?? []);
+      const { stderr: centreStderr } = await execAsync(centreCmd, {
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      const centreYavg = parseVals(
+        centreStderr.match(/lavfi\.signalstats\.YAVG=(\d+\.?\d*)/g) ?? []
+      );
       const centreMean = mean(centreYavg) || avgLuma;
 
       // Vignette = how much darker the full frame is compared to centre
       // (fullAvg < centreAvg → vignette present)
       if (centreMean > 1) {
-        vignette = Math.max(0, Math.min(1, (centreMean - avgLuma) / centreMean));
+        vignette = Math.max(
+          0,
+          Math.min(1, (centreMean - avgLuma) / centreMean)
+        );
       }
     } catch {
       vignette = 0.1;
     }
 
-    console.log(`analyzeWithFfmpeg → brightness=${brightness.toFixed(3)} contrast=${contrast.toFixed(3)} saturation=${saturation.toFixed(3)} sharpness=${sharpness.toFixed(3)} vignette=${vignette.toFixed(3)}`);
+    console.log(
+      `analyzeWithFfmpeg → brightness=${brightness.toFixed(3)} contrast=${contrast.toFixed(3)} saturation=${saturation.toFixed(3)} sharpness=${sharpness.toFixed(3)} vignette=${vignette.toFixed(3)}`
+    );
     return { brightness, contrast, saturation, sharpness, vignette };
   } catch (err) {
-    console.error("analyzeWithFfmpeg failed, using defaults:", err);
-    return { brightness: 0, contrast: 1, saturation: 1, sharpness: 1, vignette: 0.1 };
+    console.error("analyzeWithFfmpeg failed:", err);
+    throw new Error(
+      "[STRICT FAILURE] FFmpeg visual analysis failed. Default values are disabled."
+    );
   }
 }
 
@@ -989,11 +1247,13 @@ async function resolveFfprobe(): Promise<string> {
   const candidates: string[] = [];
   if (process.env.FFPROBE_PATH) candidates.push(process.env.FFPROBE_PATH);
   if (process.env.FFMPEG_PATH) {
-    candidates.push(process.env.FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, "ffprobe$1"));
+    candidates.push(
+      process.env.FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, "ffprobe$1")
+    );
   }
   candidates.push("ffprobe");
   if (process.platform === "win32") {
-    candidates.push("C:\\ffmpeg\\bin\\ffprobe.exe");
+    // Removed hardcoded C: path — use PATH environment or FFPROBE_PATH instead
   } else {
     candidates.push("/usr/bin/ffprobe", "/usr/local/bin/ffprobe");
   }
@@ -1001,7 +1261,9 @@ async function resolveFfprobe(): Promise<string> {
   for (const candidate of candidates) {
     if (!candidate) continue;
     try {
-      const cmd = /\\|\s/.test(candidate) ? `"${candidate}" -version` : `${candidate} -version`;
+      const cmd = /\\|\s/.test(candidate)
+        ? `"${candidate}" -version`
+        : `${candidate} -version`;
       await execAsync(cmd);
       return candidate;
     } catch {
@@ -1015,7 +1277,9 @@ async function resolveFfprobe(): Promise<string> {
  * Run analyzer.py against a local video file.
  * Returns the parsed JSON object, or null on any failure.
  */
-async function runAnalyzerScript(videoPath: string): Promise<Record<string, any> | null> {
+async function runAnalyzerScript(
+  videoPath: string
+): Promise<Record<string, any> | null> {
   const scriptPath = path.join(process.cwd(), "scripts", "analyzer.py");
   if (!fs.existsSync(scriptPath)) {
     console.warn("analyzer.py not found at", scriptPath);
@@ -1024,17 +1288,21 @@ async function runAnalyzerScript(videoPath: string): Promise<Record<string, any>
 
   const python = (() => {
     if (process.env.PYTHON_PATH) return process.env.PYTHON_PATH;
-    const winVenv = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe');
+    const winVenv = path.join(process.cwd(), ".venv", "Scripts", "python.exe");
     if (fs.existsSync(winVenv)) return winVenv;
-    const unixVenv = path.join(process.cwd(), '.venv', 'bin', 'python');
+    const unixVenv = path.join(process.cwd(), ".venv", "bin", "python");
     if (fs.existsSync(unixVenv)) return unixVenv;
-    return process.platform === 'win32' ? 'python' : 'python3';
+    return process.platform === "win32" ? "python" : "python3";
   })();
   const { spawn } = await import("child_process");
 
   // Pass ffprobe path as 2nd argument so analyzer.py can detect audio beats
   let ffprobePath = "ffprobe";
-  try { ffprobePath = await resolveFfprobe(); } catch { /* use default */ }
+  try {
+    ffprobePath = await resolveFfprobe();
+  } catch {
+    /* use default */
+  }
 
   const analyzer = spawn(python, [scriptPath, videoPath, ffprobePath], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -1042,8 +1310,12 @@ async function runAnalyzerScript(videoPath: string): Promise<Record<string, any>
 
   let stdout = "";
   let stderr = "";
-  analyzer.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
-  analyzer.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+  analyzer.stdout.on("data", (d: Buffer) => {
+    stdout += d.toString();
+  });
+  analyzer.stderr.on("data", (d: Buffer) => {
+    stderr += d.toString();
+  });
 
   const exitCode: number = await new Promise((resolve) => {
     analyzer.on("close", (code) => resolve(code ?? 0));
@@ -1074,7 +1346,12 @@ async function runAnalyzerScript(videoPath: string): Promise<Record<string, any>
 async function probeFfprobe(
   videoPath: string,
   ffprobeExe: string
-): Promise<{ fps: number; aspectRatio: string; hasAudio: boolean; duration: number }> {
+): Promise<{
+  fps: number;
+  aspectRatio: string;
+  hasAudio: boolean;
+  duration: number;
+}> {
   const cmd = `"${ffprobeExe}" -v quiet -print_format json -show_streams "${videoPath}"`;
   const { stdout } = await execAsync(cmd, { maxBuffer: 10 * 1024 * 1024 });
   const probe = JSON.parse(stdout);
@@ -1091,15 +1368,19 @@ async function probeFfprobe(
         const [num, den] = stream.r_frame_rate.split("/").map(Number);
         if (den > 0) fps = Math.round(num / den);
       }
-      if (stream.display_aspect_ratio && stream.display_aspect_ratio !== "0:1") {
+      if (
+        stream.display_aspect_ratio &&
+        stream.display_aspect_ratio !== "0:1"
+      ) {
         aspectRatio = stream.display_aspect_ratio;
       } else if (stream.width && stream.height) {
-        const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+        const gcd = (a: number, b: number): number =>
+          b === 0 ? a : gcd(b, a % b);
         const g = gcd(stream.width as number, stream.height as number);
         aspectRatio = `${(stream.width as number) / g}:${(stream.height as number) / g}`;
       }
       if (!duration && stream.duration) {
-        duration = parseFloat(stream.duration);
+        duration = Number.parseFloat(stream.duration);
       }
     }
     if (stream.codec_type === "audio") {
@@ -1114,7 +1395,10 @@ async function probeFfprobe(
  * Use ffmpeg's volumedetect filter to compute mean audio volume (0..1).
  * Returns 0.8 on any failure.
  */
-async function detectAudioVolume(videoPath: string, ffmpegExe: string): Promise<number> {
+async function detectAudioVolume(
+  videoPath: string,
+  ffmpegExe: string
+): Promise<number> {
   try {
     // ffmpeg writes volumedetect output to stderr; execAsync captures both.
     const safeExe = /\\|\s/.test(ffmpegExe) ? `"${ffmpegExe}"` : ffmpegExe;
@@ -1124,7 +1408,7 @@ async function detectAudioVolume(videoPath: string, ffmpegExe: string): Promise<
     );
     const match = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
     if (match) {
-      const dB = parseFloat(match[1]);
+      const dB = Number.parseFloat(match[1]);
       // Map roughly -60..0 dB → 0..1
       return Math.max(0, Math.min(1, (dB + 60) / 60));
     }
@@ -1149,7 +1433,12 @@ async function detectAudioVolume(videoPath: string, ffmpegExe: string): Promise<
  */
 function mapAnalyzerToMetadata(
   raw: Record<string, any>,
-  ffprobeData: { fps: number; aspectRatio: string; hasAudio: boolean; duration: number },
+  ffprobeData: {
+    fps: number;
+    aspectRatio: string;
+    hasAudio: boolean;
+    duration: number;
+  },
   audioVolume: number
 ): VideoMetadata {
   // ── brightness: Python normalises mean V channel to [-1, 1] ─────────────
@@ -1188,85 +1477,149 @@ function mapAnalyzerToMetadata(
     ffprobeData.duration > 0
       ? ffprobeData.duration
       : typeof raw.duration === "number"
-      ? raw.duration
-      : DEFAULT_METADATA.duration;
+        ? raw.duration
+        : DEFAULT_METADATA.duration;
 
   // ── transitionStyle: infer from scene count + cut types ───────────────────
   const sceneCount = Array.isArray(raw.scenes) ? raw.scenes.length : 1;
   const cutTimeline = Array.isArray(raw.cut_timeline)
     ? raw.cut_timeline.map((c: any) => ({
         timestamp_sec: Number(c.timestamp_sec) || 0,
-        type: c.type === "gradual_transition" ? "gradual_transition" as const : "hard_cut" as const,
+        type:
+          c.type === "gradual_transition"
+            ? ("gradual_transition" as const)
+            : ("hard_cut" as const),
         confidence: Number(c.confidence) || 0,
         hist_score: Number(c.hist_score) || 0,
         ecr_score: Number(c.ecr_score) || 0,
         td_score: Number(c.td_score) || 0,
       }))
     : [];
-  const hardCuts = cutTimeline.filter((c: { type: string }) => c.type === "hard_cut").length;
-  const gradualCuts = cutTimeline.filter((c: { type: string }) => c.type === "gradual_transition").length;
+  const hardCuts = cutTimeline.filter(
+    (c: { type: string }) => c.type === "hard_cut"
+  ).length;
+  const gradualCuts = cutTimeline.filter(
+    (c: { type: string }) => c.type === "gradual_transition"
+  ).length;
   const transitionStyle =
-    hardCuts > gradualCuts * 2 ? "cut"
-    : gradualCuts > hardCuts ? "slow-fade"
-    : sceneCount > 5 ? "cut"
-    : sceneCount > 2 ? "fade"
-    : "slow-fade";
+    hardCuts > gradualCuts * 2
+      ? "cut"
+      : gradualCuts > hardCuts
+        ? "slow-fade"
+        : sceneCount > 5
+          ? "cut"
+          : sceneCount > 2
+            ? "fade"
+            : "slow-fade";
 
   // ── colorProfile: infer from brightness + saturation levels ──────────────
   let colorProfile = "vibrant";
   if (brightness < -0.2 && saturation < 0.8) colorProfile = "dark";
   else if (brightness > 0.2 && saturation > 1.4) colorProfile = "bright";
   else if (saturation < 0.6) colorProfile = "muted";
-  else if (saturation > 1.4) colorProfile = "vivid";
+  else if (saturation > 1.4) colorProfile = "vibrant";
   else colorProfile = "vibrant";
 
   // ── Deep-extraction fields from analyzer.py ──────────────────────────
-  const colorMood: string = typeof raw.color_mood === "string" ? raw.color_mood : "neutral";
-  const channelOffsets = raw.channel_offsets && typeof raw.channel_offsets === "object"
-    ? { r: Number(raw.channel_offsets.r) || 0, g: Number(raw.channel_offsets.g) || 0, b: Number(raw.channel_offsets.b) || 0 }
-    : { r: 0, g: 0, b: 0 };
+  if (
+    typeof raw.color_mood !== "string" ||
+    raw.color_mood.trim().length === 0
+  ) {
+    throw new Error("[STRICT FAILURE] Missing ML color mood classification.");
+  }
+  const colorMood: string = raw.color_mood;
+  const channelOffsets =
+    raw.channel_offsets && typeof raw.channel_offsets === "object"
+      ? {
+          r: Number(raw.channel_offsets.r) || 0,
+          g: Number(raw.channel_offsets.g) || 0,
+          b: Number(raw.channel_offsets.b) || 0,
+        }
+      : { r: 0, g: 0, b: 0 };
 
   const parseRgb = (obj: any, fallback: { r: number; g: number; b: number }) =>
     obj && typeof obj === "object"
-      ? { r: Number(obj.r) || fallback.r, g: Number(obj.g) || fallback.g, b: Number(obj.b) || fallback.b }
+      ? {
+          r: Number(obj.r) || fallback.r,
+          g: Number(obj.g) || fallback.g,
+          b: Number(obj.b) || fallback.b,
+        }
       : fallback;
 
   const shadowsRgb = parseRgb(raw.shadows_rgb, { r: 40, g: 40, b: 50 });
   const midtonesRgb = parseRgb(raw.midtones_rgb, { r: 128, g: 128, b: 128 });
-  const highlightsRgb = parseRgb(raw.highlights_rgb, { r: 220, g: 220, b: 210 });
+  const highlightsRgb = parseRgb(raw.highlights_rgb, {
+    r: 220,
+    g: 220,
+    b: 210,
+  });
 
-  const grainDensity = typeof raw.grain_density === "number" ? raw.grain_density : 0.15;
-  const grainLabel = typeof raw.grain_label === "string" ? raw.grain_label : "light-grain";
-  const vignetteLabel = typeof raw.vignette_label === "string" ? raw.vignette_label : "light";
+  const grainDensity =
+    typeof raw.grain_density === "number" ? raw.grain_density : 0.15;
+  const grainLabel =
+    typeof raw.grain_label === "string" ? raw.grain_label : "light-grain";
+  const vignetteLabel =
+    typeof raw.vignette_label === "string" ? raw.vignette_label : "light";
   const lensBlur = typeof raw.lens_blur === "number" ? raw.lens_blur : 0.1;
-  const lensBlurLabel = typeof raw.lens_blur_label === "string" ? raw.lens_blur_label : "none";
+  const lensBlurLabel =
+    typeof raw.lens_blur_label === "string" ? raw.lens_blur_label : "none";
 
-  const velocitySegments = Array.isArray(raw.velocity_segments) ? raw.velocity_segments.slice(0, 60) : [];
-  const hasSpeedRamp = typeof raw.has_speed_ramp === "boolean" ? raw.has_speed_ramp : false;
-  const avgRelativeSpeed = typeof raw.avg_relative_speed === "number" ? raw.avg_relative_speed : 1.0;
+  const velocitySegments = Array.isArray(raw.velocity_segments)
+    ? raw.velocity_segments.slice(0, 60)
+    : [];
+  const hasSpeedRamp =
+    typeof raw.has_speed_ramp === "boolean" ? raw.has_speed_ramp : false;
+  const avgRelativeSpeed =
+    typeof raw.avg_relative_speed === "number" ? raw.avg_relative_speed : 1.0;
 
-  const motionIntensity: number = typeof raw.motion_intensity === "number" ? raw.motion_intensity : 0.3;
-  const motionStyle: string = typeof raw.motion_style === "string" ? raw.motion_style : "smooth";
-  const isCinematic: boolean = typeof raw.is_cinematic === "boolean" ? raw.is_cinematic : false;
-  const orientation: string = typeof raw.orientation === "string" ? raw.orientation : "horizontal";
+  const motionIntensity: number =
+    typeof raw.motion_intensity === "number" ? raw.motion_intensity : 0.3;
+  const motionStyle: string =
+    typeof raw.motion_style === "string" ? raw.motion_style : "smooth";
+  const isCinematic: boolean =
+    typeof raw.is_cinematic === "boolean" ? raw.is_cinematic : false;
+  const orientation: string =
+    typeof raw.orientation === "string" ? raw.orientation : "horizontal";
 
   const audioRaw = raw.audio && typeof raw.audio === "object" ? raw.audio : {};
   const audioBeatData = {
     beats: Array.isArray(audioRaw.beats) ? audioRaw.beats.slice(0, 80) : [],
-    firstBeatSec: typeof audioRaw.first_beat_sec === "number" ? audioRaw.first_beat_sec : 0,
+    firstBeatSec:
+      typeof audioRaw.first_beat_sec === "number" ? audioRaw.first_beat_sec : 0,
     peakDb: typeof audioRaw.peak_db === "number" ? audioRaw.peak_db : -20,
   };
 
   return {
-    colorProfile, brightness, contrast, saturation, sharpness, vignette,
+    colorProfile,
+    brightness,
+    contrast,
+    saturation,
+    sharpness,
+    vignette,
     aspectRatio: ffprobeData.aspectRatio,
     fps: ffprobeData.fps,
-    hasAudio: ffprobeData.hasAudio || (audioRaw.has_audio === true),
-    audioVolume, duration, transitionStyle,
-    colorMood, channelOffsets, shadowsRgb, midtonesRgb, highlightsRgb,
-    grainDensity, grainLabel, vignetteLabel, lensBlur, lensBlurLabel,
-    velocitySegments, hasSpeedRamp, avgRelativeSpeed,
-    motionIntensity, motionStyle, isCinematic, orientation, audioBeatData,
+    hasAudio: ffprobeData.hasAudio || audioRaw.has_audio === true,
+    audioVolume,
+    duration,
+    transitionStyle,
+    colorMood,
+    channelOffsets,
+    shadowsRgb,
+    midtonesRgb,
+    highlightsRgb,
+    grainDensity,
+    grainLabel,
+    vignetteLabel,
+    lensBlur,
+    lensBlurLabel,
+    velocitySegments,
+    hasSpeedRamp,
+    avgRelativeSpeed,
+    motionIntensity,
+    motionStyle,
+    isCinematic,
+    orientation,
+    audioBeatData,
     cutTimeline,
   };
 }
@@ -1295,7 +1648,12 @@ export async function extractVideoMetadata(
     const analyzerResult = await runAnalyzerScript(videoPath);
 
     // ── Step 2 & 3: ffprobe + volumedetect ───────────────────────────────
-    let ffprobeData: { fps: number; aspectRatio: string; hasAudio: boolean; duration: number } = {
+    let ffprobeData: {
+      fps: number;
+      aspectRatio: string;
+      hasAudio: boolean;
+      duration: number;
+    } = {
       fps: 30,
       aspectRatio: "16:9",
       hasAudio: false,
@@ -1318,19 +1676,27 @@ export async function extractVideoMetadata(
         }
       }
     } catch (probeErr) {
-      console.warn("ffprobe unavailable, using defaults for fps/aspectRatio/audio:", probeErr);
+      console.warn(
+        "ffprobe unavailable, using defaults for fps/aspectRatio/audio:",
+        probeErr
+      );
     }
 
     // ── Step 3: map → VideoMetadata ───────────────────────────────────────
     if (!analyzerResult) {
-      console.warn("analyzer.py produced no results; using default visual metrics");
+      console.warn(
+        "analyzer.py produced no results; using default visual metrics"
+      );
       return {
         ...DEFAULT_METADATA,
         fps: ffprobeData.fps,
         aspectRatio: ffprobeData.aspectRatio,
         hasAudio: ffprobeData.hasAudio,
         audioVolume,
-        duration: ffprobeData.duration > 0 ? ffprobeData.duration : DEFAULT_METADATA.duration,
+        duration:
+          ffprobeData.duration > 0
+            ? ffprobeData.duration
+            : DEFAULT_METADATA.duration,
         cutTimeline: [],
       };
     }

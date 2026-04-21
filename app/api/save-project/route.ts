@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
+import { withDbRetry } from "@/db/drizzle";
+import { project, user } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { db } from "@/server/db";
-import { project, user } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { isConnectionError, withDbRetry, resetPool } from "@/db/drizzle";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Background DB save — fire-and-forget.  Logs success/failure but never
@@ -15,7 +15,7 @@ function saveToDbInBackground(
   name: string,
   type: "template" | "reference-target",
   videoUrl: string,
-  metadata: Record<string, unknown> | null,
+  metadata: Record<string, unknown> | null
 ) {
   const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -25,21 +25,27 @@ function saveToDbInBackground(
       // Ensure dev-guest user exists (FK constraint)
       if (userId === "dev-guest") {
         const existing = await withDbRetry(
-          () => db.select({ id: user.id }).from(user).where(eq(user.id, "dev-guest")).limit(1),
-          "check-dev-guest",
+          () =>
+            db
+              .select({ id: user.id })
+              .from(user)
+              .where(eq(user.id, "dev-guest"))
+              .limit(1),
+          "check-dev-guest"
         );
         if (existing.length === 0) {
           await withDbRetry(
-            () => db.insert(user).values({
-              id: "dev-guest",
-              name: "Dev Guest",
-              email: "dev-guest@localhost",
-              emailVerified: false,
-              role: "user",
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            }),
-            "create-dev-guest",
+            () =>
+              db.insert(user).values({
+                id: "dev-guest",
+                name: "Dev Guest",
+                email: "dev-guest@localhost",
+                emailVerified: false,
+                role: "user",
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              }),
+            "create-dev-guest"
           );
           console.log("[save-project/bg] Created dev-guest user.");
         }
@@ -58,15 +64,15 @@ function saveToDbInBackground(
             createdAt: new Date(),
             updatedAt: new Date(),
           }),
-        "insert-project",
+        "insert-project"
       );
       console.log(`[save-project/bg] ✅ Saved to DB: ${projectId}`);
     } catch (err) {
       // After all retries exhausted — log but do NOT crash the server.
       // The user already has their video file in public/outputs/.
       console.error(
-        `[save-project/bg] ❌ DB save failed after retries:`,
-        err instanceof Error ? err.message : err,
+        "[save-project/bg] ❌ DB save failed after retries:",
+        err instanceof Error ? err.message : err
       );
     }
   })();
@@ -84,7 +90,7 @@ export async function POST(request: NextRequest) {
         return null;
       });
 
-    if (!session || !session.user) {
+    if (!(session && session.user)) {
       if (process.env.NODE_ENV === "production") {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }
@@ -151,7 +157,7 @@ export async function POST(request: NextRequest) {
       name,
       type,
       videoUrlToStore,
-      metadata,
+      metadata
     );
 
     console.log(
@@ -165,7 +171,7 @@ export async function POST(request: NextRequest) {
         videoUrl: videoUrlOverride || undefined,
         message: "Video available. Saving to database in background.",
       },
-      { status: 200 },
+      { status: 200 }
     );
   } catch (error) {
     console.error("[save-project] Error:", error);
@@ -183,7 +189,7 @@ export async function POST(request: NextRequest) {
           "Your video was rendered and is available for download " +
           "from the local outputs folder.",
       },
-      { status: 200 }, // 200 so the client can still read the response
+      { status: 200 } // 200 so the client can still read the response
     );
   }
 }

@@ -5,6 +5,8 @@
  * that can be rendered directly on dashboard cards.
  */
 
+import type { PipelineSummary } from "../editor";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Primitives
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,7 +59,12 @@ export interface TemplateOverlayEffect {
   /** Timestamp of the overlay (seconds) */
   time_sec: number;
   /** Overlay kind */
-  kind: "white_flash" | "color_flash" | "vignette_pulse" | "film_burn" | "glitch_block";
+  kind:
+    | "white_flash"
+    | "color_flash"
+    | "vignette_pulse"
+    | "film_burn"
+    | "glitch_block";
   /** Duration of the overlay (seconds) */
   durationSec: number;
   /** Peak intensity (0-1) */
@@ -74,7 +81,12 @@ export interface TemplateOverlayEffect {
 export type CutType = "hard_cut" | "gradual_transition";
 
 /** Specific transition subtype detected from frame analysis around boundary */
-export type TransitionSubtype = "dissolve" | "blur_transition" | "flash_transition" | "fade" | "unknown";
+export type TransitionSubtype =
+  | "dissolve"
+  | "blur_transition"
+  | "flash_transition"
+  | "fade"
+  | "unknown";
 
 export interface ShotBoundary {
   timestamp_sec: number;
@@ -445,7 +457,11 @@ export interface EditTransferResult {
   filterGraphSummary: string;
   /** Total wall-clock processing time in ms */
   processingMs: number;
+  /** Post-render style match score in percentage */
+  styleMatchScore?: number;
   error?: string;
+  /** Pipeline execution summary showing which ML features succeeded/failed */
+  pipelineSummary?: import("../utils/pipeline-logger").PipelineSummary;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -556,9 +572,9 @@ export interface EditingBlueprint {
 
 /** Strategy for adapting a longer/shorter blueprint onto a target timeline. */
 export type AdaptationStrategy =
-  | "proportional"   // Scale all timestamps linearly
-  | "loop"           // Tile the pattern cyclically
-  | "truncate";      // Apply only what fits, ignore the rest
+  | "proportional" // Scale all timestamps linearly
+  | "loop" // Tile the pattern cyclically
+  | "truncate"; // Apply only what fits, ignore the rest
 
 /** Options controlling how a blueprint is applied to a target. */
 export interface BlueprintTransferOptions {
@@ -800,4 +816,17 @@ export interface DashboardAnalysisResponse {
   processedAt: string;
   cards: DashboardCard[];
   raw: FullVideoMetadata;
+  /** Pipeline execution summary showing which ML features succeeded/failed */
+  pipelineSummary?: PipelineSummary;
+  /** Present when `analyzeVideo` succeeds — required for buffer-based FFmpeg render */
+  styleDNA?: import("./render-style-dna").RenderStyleDNA;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline Summary (re-exported from pipeline-logger for convenience)
+// ─────────────────────────────────────────────────────────────────────────────
+export type {
+  PipelineSummary,
+  StageResult,
+  StageStatus,
+} from "../utils/pipeline-logger";

@@ -1,372 +1,244 @@
-#!/usr/bin/env python3
-"""
-ML Depth Analysis — Real MiDaS / Depth-Anything Monocular Depth Estimation
-============================================================================
-Uses real pre-trained monocular depth estimation models for per-frame
-depth map generation.
-
-Model Cascade (tries in order):
-  1. Depth-Anything V2 (via transformers) — state of the art (2024)
-  2. MiDaS v3.1 DPT-Large (via torch.hub) — robust, well-tested
-  3. MiDaS v2.1 Small (via torch.hub) — lightweight fallback
-  4. FFmpeg blurdetect heuristic — no ML, worst quality
-
-Each model produces per-pixel relative depth maps. We extract:
-  - Per-frame mean depth, variance, fg/bg separation
-  - Depth timeline across the video
-  - Parallax classification (flat / deep-focus / shallow-dof / racking)
-
-Output: JSON with depth timeline, parallax metrics, and depth style.
-
-Usage:
-  python scripts/ml_depth_analysis.py <video_path> [--fps 2] [--model auto]
-
-Dependencies:
-  torch, torchvision, timm, transformers (optional)
-  Model weights auto-downloaded on first run (~350MB for MiDaS Large).
-"""
-
 import sys
-import json
 import os
-import subprocess
-import tempfile
-import gc
+import cv2
+import json
 import numpy as np
-
+import gc
 
 class NumpyEncoder(json.JSONEncoder):
-    """JSON encoder that handles numpy types."""
     def default(self, obj):
-        if isinstance(obj, (np.integer,)):
-            return int(obj)
-        if isinstance(obj, (np.floating,)):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
+        if isinstance(obj, (np.integer,)): return int(obj)
+        if isinstance(obj, (np.floating,)): return float(obj)
+        if isinstance(obj, np.ndarray): return obj.tolist()
         return super().default(obj)
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
+if torch is None:
+    DEVICE = "cpu"
+else:
+    # Force CUDA-only runtime to avoid accidental CPU fallbacks which are
+    # extremely slow for Depth-Anything V2. Fail fast if CUDA is not available.
+    if not torch.cuda.is_available():
+        sys.stderr.write("[depth] ERROR: CUDA not available — refusing CPU fallback to avoid slow execution\n")
+        raise RuntimeError("CUDA not available")
+    DEVICE = torch.device("cuda")
 
 def json_dumps(obj):
-    """Serialize to JSON with numpy support."""
     return json.dumps(obj, cls=NumpyEncoder)
 
-
-def find_ffmpeg():
-    """Find ffmpeg executable."""
-    for name in ['ffmpeg', 'ffmpeg.exe']:
-        for d in os.environ.get('PATH', '').split(os.pathsep):
-            p = os.path.join(d, name)
-            if os.path.isfile(p):
-                return p
-    for p in [r'C:\ffmpeg\bin\ffmpeg.exe', r'C:\ProgramData\chocolatey\bin\ffmpeg.exe',
-              '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg']:
-        if os.path.isfile(p):
-            return p
-    return 'ffmpeg'
-
-
-def get_video_duration(video_path):
-    """Get video duration in seconds."""
-    ffmpeg = find_ffmpeg()
-    ffprobe = ffmpeg.replace('ffmpeg', 'ffprobe')
-    cmd = [ffprobe, '-v', 'quiet', '-show_entries', 'format=duration',
-           '-of', 'default=nw=1:nk=1', video_path]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        return float(result.stdout.strip())
-    except Exception:
-        return 10
-
-
-def extract_frames(video_path, fps=2, max_frames=60):
-    """Extract frames for depth analysis."""
-    import cv2
-
-    ffmpeg = find_ffmpeg()
-    tmpdir = tempfile.mkdtemp(prefix='ml_depth_')
-
-    cmd = [
-        ffmpeg, '-y', '-i', video_path,
-        '-vf', f'fps={fps},scale=384:-2',
-        '-frames:v', str(max_frames),
-        '-q:v', '3',
-        os.path.join(tmpdir, 'frame_%06d.jpg')
-    ]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-
-    frames = []
-    for fname in sorted(os.listdir(tmpdir)):
-        if fname.endswith('.jpg'):
-            fpath = os.path.join(tmpdir, fname)
-            frame = cv2.imread(fpath)
-            if frame is not None:
-                frames.append(frame)
-            try:
-                os.unlink(fpath)
-            except OSError:
-                pass
-
-    try:
-        os.rmdir(tmpdir)
-    except OSError:
-        pass
-
-    return frames
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Model Cascade — Depth-Anything → MiDaS Large → MiDaS Small
-# ═══════════════════════════════════════════════════════════════════════════════
+def empty_result():
+    raise RuntimeError("ANTI-FAKE: empty_result() requested but no real data available.")
 
 def try_depth_anything(frames):
-    """
-    Try Depth-Anything V2 via HuggingFace transformers.
-    State-of-the-art monocular depth estimation (2024).
-    """
     try:
-        import torch
         from transformers import AutoImageProcessor, AutoModelForDepthEstimation
         from PIL import Image
-        import cv2
-
-        print("[Depth-Anything] Loading Depth-Anything-V2-Small...", file=sys.stderr, flush=True)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        processor = AutoImageProcessor.from_pretrained("depth-anything/Depth-Anything-V2-Small-hf")
-        model = AutoModelForDepthEstimation.from_pretrained("depth-anything/Depth-Anything-V2-Small-hf").to(device)
-        model.eval()
-
-        print(f"[Depth-Anything] Model loaded on {device}, processing {len(frames)} frames...",
-              file=sys.stderr, flush=True)
-
-        depth_maps = []
-        for i, frame in enumerate(frames):
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(rgb)
-
-            inputs = processor(images=pil_img, return_tensors="pt").to(device)
+        proc = AutoImageProcessor.from_pretrained("depth-anything/Depth-Anything-V2-Base-hf")
+        model = AutoModelForDepthEstimation.from_pretrained("depth-anything/Depth-Anything-V2-Base-hf").to(DEVICE).eval()
+        
+        results = []
+        for f in frames:
+            pil_img = Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB))
+            inputs = proc(images=pil_img, return_tensors="pt").to(DEVICE)
             with torch.no_grad():
                 outputs = model(**inputs)
-                predicted_depth = outputs.predicted_depth
-
-            # Interpolate to original size
-            depth = torch.nn.functional.interpolate(
-                predicted_depth.unsqueeze(1),
-                size=frame.shape[:2],
-                mode="bicubic",
-                align_corners=False,
-            ).squeeze().cpu().numpy()
-
-            # Normalize to 0-1
-            depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
-            depth_maps.append(depth)
-
-            if (i + 1) % 5 == 0:
-                print(f"[Depth-Anything] {i+1}/{len(frames)} frames processed", file=sys.stderr, flush=True)
-
-        del model, processor
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
-
-        return depth_maps, "depth-anything-v2-small"
-
-    except ImportError as e:
-        print(f"[Depth-Anything] Not available: {e}", file=sys.stderr)
-        return None, None
+            d = outputs.predicted_depth.squeeze().cpu().numpy()
+            results.append(d)
+        return results, "depth-anything-v2"
     except Exception as e:
-        print(f"[Depth-Anything] Failed: {e}", file=sys.stderr)
-        return None, None
+        sys.stderr.write(f"[depth] Depth-Anything V2 failed: {e}\n")
+        return None, "none"
 
-
-def try_midas(frames, model_type="DPT_Large"):
-    """
-    Try MiDaS depth estimation via torch.hub.
-
-    MiDaS models (Intel ISL):
-      - DPT_Large:  384x384 input, DPT-Large architecture (~350MB)
-      - DPT_Hybrid: 384x384 input, DPT-Hybrid architecture (~120MB)
-      - MiDaS_small: 256x256 input, EfficientNet backbone (~20MB)
-    """
+def try_midas(frames):
     try:
-        import torch
-        import cv2
-
-        print(f"[MiDaS] Loading {model_type} from torch.hub...", file=sys.stderr, flush=True)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        model = torch.hub.load("intel-isl/MiDaS", model_type, trust_repo=True)
-        model.to(device).eval()
-
-        midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
-        if model_type in ["DPT_Large", "DPT_Hybrid"]:
-            transform = midas_transforms.dpt_transform
-        else:
-            transform = midas_transforms.small_transform
-
-        print(f"[MiDaS] {model_type} loaded on {device}, processing {len(frames)} frames...",
-              file=sys.stderr, flush=True)
-
-        depth_maps = []
-        for i, frame in enumerate(frames):
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            input_batch = transform(rgb).to(device)
-
+        model = torch.hub.load("intel-isl/MiDaS", "MiDaS_small").to(DEVICE).eval()
+        transform = torch.hub.load("intel-isl/MiDaS", "transforms").small_transform
+        results = []
+        for f in frames:
+            rgb = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
+            input_batch = transform(rgb).to(DEVICE)
             with torch.no_grad():
                 prediction = model(input_batch)
-                prediction = torch.nn.functional.interpolate(
-                    prediction.unsqueeze(1),
-                    size=frame.shape[:2],
-                    mode="bicubic",
-                    align_corners=False,
-                ).squeeze()
-
-            depth = prediction.cpu().numpy()
-            # Normalize to 0-1 (MiDaS outputs inverse depth)
-            depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
-            depth_maps.append(depth)
-
-            if (i + 1) % 5 == 0:
-                print(f"[MiDaS] {i+1}/{len(frames)} frames processed", file=sys.stderr, flush=True)
-
-        del model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
-
-        return depth_maps, f"midas-{model_type.lower()}"
-
+            results.append(prediction.squeeze().cpu().numpy())
+        return results, "midas-small"
     except Exception as e:
-        print(f"[MiDaS] {model_type} failed: {e}", file=sys.stderr)
-        return None, None
+        sys.stderr.write(f"[depth] MiDaS failed: {e}\n")
+        return None, "none"
 
-
-def analyze_depth_maps(depth_maps, fps, duration):
-    """Analyze depth maps to extract per-frame metrics."""
-    timeline = []
-
-    for i, depth in enumerate(depth_maps):
-        t = i / fps
-        if t > duration:
+def read_frames_from_stdin(width, height, count=None):
+    frame_size = width * height * 3
+    frames_processed = 0
+    while True:
+        if count is not None and frames_processed >= count:
             break
+        raw_frame = sys.stdin.buffer.read(frame_size)
+        if len(raw_frame) != frame_size:
+            break
+        frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((height, width, 3))
+        # Convert RGB to BGR for OpenCV consistency
+        import cv2
+        yield cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frames_processed += 1
 
-        mean_depth = float(np.mean(depth))
-        depth_variance = float(np.var(depth))
-
-        # Foreground-background separation:
-        # Compute the difference between the upper quartile and lower quartile
-        # of depth values — large gap = strong fg/bg separation
-        q25 = float(np.percentile(depth, 25))
-        q75 = float(np.percentile(depth, 75))
-        fg_bg_separation = min(1.0, (q75 - q25) * 2)  # Scale to 0-1
-
-        timeline.append({
-            "time_sec": round(t, 4),
-            "meanDepth": round(mean_depth, 4),
-            "depthVariance": round(depth_variance, 4),
-            "fgBgSeparation": round(fg_bg_separation, 4),
-        })
-
-    # Aggregate metrics
-    avg_fg_bg = float(np.mean([f["fgBgSeparation"] for f in timeline])) if timeline else 0
-    avg_mean_depth = float(np.mean([f["meanDepth"] for f in timeline])) if timeline else 0.5
-    has_strong_parallax = avg_fg_bg > 0.4
-
-    # Classify depth style
-    if timeline and len(timeline) > 4:
-        sep_values = [f["fgBgSeparation"] for f in timeline]
-        sep_variance = float(np.var(sep_values))
-        if sep_variance > 0.04:
-            depth_style = "racking"
-        elif avg_fg_bg > 0.6:
-            depth_style = "shallow-dof"
-        elif avg_fg_bg > 0.25:
-            depth_style = "deep-focus"
+def analyze_depth_live(width, height, fps=2, max_frames=None, model_pref="auto"):
+    import time
+    t0 = time.time()
+    
+    # Selection logic
+    model_type = "none"
+    
+    count = 0
+    dt = 1.0 / fps
+    
+    for frame in read_frames_from_stdin(width, height, max_frames):
+        if model_type == "none":
+            # Try Depth-Anything first
+            depth_maps, model_type = try_depth_anything([frame])
+            if model_type == "none":
+                depth_maps, model_type = try_midas([frame])
+            
+            if model_type == "none":
+                raise RuntimeError("[depth] All depth models failed to load.")
+            
+            sys.stderr.write(f"[depth] Initialized: model={model_type} device={DEVICE}\n")
         else:
-            depth_style = "flat"
-    else:
-        depth_style = "flat"
+            if "anything" in model_type:
+                depth_maps, _ = try_depth_anything([frame])
+            else:
+                depth_maps, _ = try_midas([frame])
+        
+        t = count * dt
+        if depth_maps and len(depth_maps) > 0:
+            d_map = depth_maps[0]
+            # Normalize map to 0-1 for variance check
+            d_min, d_max = d_map.min(), d_map.max()
+            if d_max - d_min > 1e-6:
+                d_map = (d_map - d_min) / (d_max - d_min)
+            
+            avg_d = float(np.mean(d_map))
+            var_d = float(np.var(d_map))
+            
+            if count == 0:
+                sys.stderr.write(f"[depth] Sample: frame={count} avg={avg_d:.4f} var={var_d:.6f}\n")
+            
+            obj = {
+                "frame_index": count,
+                "timestamp": round(t, 4),
+                "depth": {
+                    "averageDepth": round(avg_d, 4),
+                    "depthVariance": round(var_d, 6),
+                    "model": model_type
+                }
+            }
+            print(json.dumps(obj), flush=True)
+        else:
+            raise RuntimeError(f"[depth] Depth extraction failed at frame {count}")
 
-    return {
-        "depthTimeline": timeline,
-        "avgFgBgSeparation": round(avg_fg_bg, 4),
-        "hasStrongParallax": has_strong_parallax,
-        "depthStyle": depth_style,
-        "avgMeanDepth": round(avg_mean_depth, 4),
-    }
+        count += 1
+        if count % 20 == 0:
+            import gc
+            gc.collect()
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Main Pipeline
-# ═══════════════════════════════════════════════════════════════════════════════
+    duration = time.time() - t0
+    sys.stderr.write(f"[depth] Done: frames={count} time={duration:.2f}s model={model_type}\n")
+    return {"frameCount": count, "mlModel": model_type}
 
 def analyze_depth(video_path, fps=2, model_pref="auto"):
-    """
-    Full depth analysis pipeline with model cascade.
+    """Fallback for non-stdin processing of a file."""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open video: {video_path}")
+    
+    import time
+    t0 = time.time()
+    
+    model_type = "none"
+    results = []
+    count = 0
+    dt = 1.0 / fps
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret: break
+        
+        if model_type == "none":
+            depth_maps, model_type = try_depth_anything([frame])
+            if model_type == "none":
+                depth_maps, model_type = try_midas([frame])
+            if model_type == "none":
+                raise RuntimeError("[depth] All depth models failed to load.")
+        else:
+            if "anything" in model_type:
+                depth_maps, _ = try_depth_anything([frame])
+            else:
+                depth_maps, _ = try_midas([frame])
+                
+        if depth_maps:
+            d_map = depth_maps[0]
+            d_min, d_max = d_map.min(), d_map.max()
+            if d_max - d_min > 1e-6:
+                d_map = (d_map - d_min) / (d_max - d_min)
+            
+            results.append({
+                "frame_index": count,
+                "timestamp": round(count * dt, 4),
+                "depth": {
+                    "averageDepth": round(float(np.mean(d_map)), 4),
+                    "depthVariance": round(float(np.var(d_map)), 6),
+                    "model": model_type
+                }
+            })
+        count += 1
+        if count % 20 == 0: gc.collect()
 
-    Order: Depth-Anything V2 → MiDaS DPT-Large → MiDaS Small → empty
-    """
-    duration = get_video_duration(video_path)
-    frames = extract_frames(video_path, fps=fps, max_frames=60)
-
-    if not frames:
-        return empty_result(duration)
-
-    print(f"[depth] Extracted {len(frames)} frames at {fps}fps for depth analysis",
-          file=sys.stderr, flush=True)
-
-    depth_maps = None
-    model_name = "none"
-
-    # Model cascade
-    if model_pref in ("auto", "depth-anything-v2"):
-        depth_maps, model_name = try_depth_anything(frames)
-
-    if depth_maps is None and model_pref in ("auto", "midas-large"):
-        depth_maps, model_name = try_midas(frames, "DPT_Large")
-
-    if depth_maps is None and model_pref in ("auto", "midas-hybrid"):
-        depth_maps, model_name = try_midas(frames, "DPT_Hybrid")
-
-    if depth_maps is None and model_pref in ("auto", "midas-small"):
-        depth_maps, model_name = try_midas(frames, "MiDaS_small")
-
-    if depth_maps is None:
-        print("[depth] All depth models unavailable, returning empty result", file=sys.stderr)
-        return empty_result(duration)
-
-    print(f"[depth] Depth estimation complete with {model_name}: {len(depth_maps)} maps",
-          file=sys.stderr, flush=True)
-
-    result = analyze_depth_maps(depth_maps, fps, duration)
-    result["mlModel"] = model_name
-    return result
-
-
-def empty_result(duration=0):
-    return {
-        "depthTimeline": [],
-        "avgFgBgSeparation": 0,
-        "hasStrongParallax": False,
-        "depthStyle": "flat",
-        "avgMeanDepth": 0.5,
-        "mlModel": "none",
-    }
-
+    cap.release()
+    return {"frameCount": count, "mlModel": model_type, "depthTimeline": results}
 
 def main():
+    import time as _time
+    _t0 = _time.time()
+    stages_log = []
+
+    def _emit(result, warnings=None):
+        result["_pipelineOk"] = "error" not in result or result.get("frameCount", 0) > 0
+        result["_stages"] = stages_log
+        result["_processingMs"] = round((_time.time() - _t0) * 1000)
+        if warnings:
+            result["_warnings"] = warnings
+        print(json_dumps(result))
+
+    if '--stdin' in sys.argv:
+        width = 1920
+        height = 1080
+        fps = 2
+        model = "auto"
+        max_f = None
+        if '--width' in sys.argv: width = int(sys.argv[sys.argv.index('--width') + 1])
+        if '--height' in sys.argv: height = int(sys.argv[sys.argv.index('--height') + 1])
+        if '--fps' in sys.argv: fps = int(sys.argv[sys.argv.index('--fps') + 1])
+        if '--model' in sys.argv: model = sys.argv[sys.argv.index('--model') + 1]
+        if '--frames' in sys.argv: max_f = int(sys.argv[sys.argv.index('--frames') + 1])
+        
+        try:
+            result = analyze_depth_live(width, height, fps, max_f, model)
+            _emit(result)
+        except Exception as e:
+            _emit({"error": str(e), **empty_result()})
+        return
+
     if len(sys.argv) < 2:
-        print(json_dumps({"error": "Usage: ml_depth_analysis.py <video_path> [--fps 2] [--model auto]",
-                          **empty_result()}))
+        _emit({"error": "Usage: ml_depth_analysis.py <video_path>", **empty_result()})
         return
 
     video_path = sys.argv[1]
-    if video_path.startswith('"') and video_path.endswith('"'):
-        video_path = video_path[1:-1]
-
+    if video_path.startswith('"') and video_path.endswith('"'): video_path = video_path[1:-1]
     if not os.path.isfile(video_path):
-        print(json_dumps({"error": f"File not found: {video_path}", **empty_result()}))
+        _emit({"error": f"File not found: {video_path}", **empty_result()})
         return
 
     fps = 2
@@ -374,23 +246,23 @@ def main():
     if '--fps' in sys.argv:
         idx = sys.argv.index('--fps')
         if idx + 1 < len(sys.argv):
-            try:
-                fps = int(sys.argv[idx + 1])
-            except ValueError:
-                pass
+            try: fps = int(sys.argv[idx + 1])
+            except ValueError: pass
     if '--model' in sys.argv:
         idx = sys.argv.index('--model')
-        if idx + 1 < len(sys.argv):
-            model = sys.argv[idx + 1]
+        if idx + 1 < len(sys.argv): model = sys.argv[idx + 1]
 
+    warnings = []
     try:
+        st = _time.time()
         result = analyze_depth(video_path, fps=fps, model_pref=model)
-        print(json_dumps(result))
+        used_model = result.get("mlModel", "none")
+        stages_log.append({"name": "depth-analysis", "ok": used_model != "none", "model": used_model, "ms": round((_time.time() - st) * 1000)})
+        _emit(result, warnings if warnings else None)
     except Exception as e:
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        print(json_dumps({"error": str(e), **empty_result()}))
-
+        import traceback; traceback.print_exc(file=sys.stderr)
+        stages_log.append({"name": "depth-analysis", "ok": False, "error": str(e)})
+        _emit({"error": str(e), **empty_result()}, warnings if warnings else None)
 
 if __name__ == "__main__":
     main()

@@ -8,6 +8,13 @@
 			"isBackground": true,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "Next.js Dev Server",
+			"type": "shell",
+			"command": "Set-Location e:\\automated-video-editor; npx cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbopack",
+			"isBackground": true,
+			"group": "build"
 		}
 	]
 }

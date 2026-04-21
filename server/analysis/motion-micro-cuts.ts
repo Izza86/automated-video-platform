@@ -11,7 +11,7 @@
  * or micro-zoom to simulate reference pacing.
  */
 
-import type { MotionAnalysisResult, ColorGradingResult } from "../types";
+import type { ColorGradingResult, MotionAnalysisResult } from "../types";
 
 export interface MotionMicroCut {
   /** Timestamp in reference video (seconds) */
@@ -46,15 +46,20 @@ export interface MotionMicroCutDetectionResult {
  */
 export function detectMotionSpikes(
   motionAnalysis: MotionAnalysisResult,
-  threshold: number = 0.75,
+  threshold = 0.75
 ): MotionMicroCut[] {
   const microCuts: MotionMicroCut[] = [];
 
-  if (!motionAnalysis.velocityTimeline || motionAnalysis.velocityTimeline.length < 2) {
+  if (
+    !motionAnalysis.velocityTimeline ||
+    motionAnalysis.velocityTimeline.length < 2
+  ) {
     return microCuts;
   }
 
-  const velocities = motionAnalysis.velocityTimeline.map((v) => v.relative_speed || 0);
+  const velocities = motionAnalysis.velocityTimeline.map(
+    (v) => v.relative_speed || 0
+  );
 
   // Compute percentile threshold
   const sorted = [...velocities].sort((a, b) => a - b);
@@ -76,7 +81,7 @@ export function detectMotionSpikes(
         trigger: "motion_spike",
         confidence,
         action: curr > thresholdVal * 1.5 ? "hard_cut" : "micro_zoom",
-        zoomFactor: 1 + (confidence * 0.15), // Subtle zoom
+        zoomFactor: 1 + confidence * 0.15, // Subtle zoom
       });
     }
   }
@@ -94,12 +99,15 @@ export function detectMotionSpikes(
  */
 export function detectHistogramDiscontinuities(
   colorGrading: ColorGradingResult,
-  histThreshold: number = 0.3,
+  histThreshold = 0.3
 ): MotionMicroCut[] {
   const microCuts: MotionMicroCut[] = [];
 
   // If we have temporal color samples, check for jumps between adjacent samples
-  if (!colorGrading.temporalSamples || colorGrading.temporalSamples.length < 2) {
+  if (
+    !colorGrading.temporalSamples ||
+    colorGrading.temporalSamples.length < 2
+  ) {
     return microCuts;
   }
 
@@ -113,7 +121,9 @@ export function detectHistogramDiscontinuities(
     let divergence = 0;
     // Use contrast + saturation shift as histogram discontinuity proxy
     const contrastDiff = Math.abs(prevSample.contrast - currSample.contrast);
-    const saturationDiff = Math.abs(prevSample.saturation - currSample.saturation);
+    const saturationDiff = Math.abs(
+      prevSample.saturation - currSample.saturation
+    );
     divergence = (contrastDiff + saturationDiff) / 2;
 
     // If divergence exceeds threshold, flag as discontinuity
@@ -140,11 +150,14 @@ export function detectHistogramDiscontinuities(
  */
 export function detectLuminanceDeltas(
   colorGrading: ColorGradingResult,
-  lumaThreshold: number = 0.25,
+  lumaThreshold = 0.25
 ): MotionMicroCut[] {
   const microCuts: MotionMicroCut[] = [];
 
-  if (!colorGrading.temporalSamples || colorGrading.temporalSamples.length < 2) {
+  if (
+    !colorGrading.temporalSamples ||
+    colorGrading.temporalSamples.length < 2
+  ) {
     return microCuts;
   }
 
@@ -166,7 +179,8 @@ export function detectLuminanceDeltas(
         timestamp_sec: currSample.time_sec,
         trigger: "luminance_delta",
         confidence,
-        action: lumaDelta > lumaThreshold * 1.5 ? "hard_cut" : "brightness_pulse",
+        action:
+          lumaDelta > lumaThreshold * 1.5 ? "hard_cut" : "brightness_pulse",
         luminanceDelta: currLuma - prevLuma,
       });
     }
@@ -187,7 +201,7 @@ export function detectLuminanceDeltas(
 export function detectFallbackPacing(
   motionAnalysis: MotionAnalysisResult,
   colorGrading: ColorGradingResult,
-  minConfidence: number = 0.5,
+  minConfidence = 0.5
 ): MotionMicroCutDetectionResult {
   const motionSpikes = detectMotionSpikes(motionAnalysis);
   const histDisc = detectHistogramDiscontinuities(colorGrading);
@@ -206,7 +220,7 @@ export function detectFallbackPacing(
   const deduped: MotionMicroCut[] = [];
   for (const cut of allCuts) {
     const existingIdx = deduped.findIndex(
-      (c) => Math.abs(c.timestamp_sec - cut.timestamp_sec) < 0.1,
+      (c) => Math.abs(c.timestamp_sec - cut.timestamp_sec) < 0.1
     );
     if (existingIdx >= 0) {
       if (cut.confidence > deduped[existingIdx].confidence) {
@@ -220,7 +234,8 @@ export function detectFallbackPacing(
   const hasSignificantMotion = motionAnalysis.motionIntensity > 0.3;
   const avgMotionSpikeMagnitude =
     motionSpikes.length > 0
-      ? motionSpikes.reduce((sum, c) => sum + c.confidence, 0) / motionSpikes.length
+      ? motionSpikes.reduce((sum, c) => sum + c.confidence, 0) /
+        motionSpikes.length
       : 0;
 
   return {

@@ -1,9 +1,19 @@
-
 "use client";
-import { useState, useEffect } from "react";
+import {
+  Bell,
+  Eye,
+  Lock,
+  LogOut,
+  Menu,
+  Search,
+  Settings,
+  User,
+  UserCircle,
+} from "lucide-react";
 
 import Link from "next/link";
-import { Search, Bell, User, Settings, LogOut, Eye, UserCircle, Lock, Menu } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,14 +23,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { authClient } from "@/lib/auth-client";
-import { useRouter } from "next/navigation";
 
 interface DashboardNavbarProps {
   currentUser: any;
   onMenuToggle: () => void;
 }
 
-export function DashboardNavbar({ currentUser, onMenuToggle }: DashboardNavbarProps) {
+export function DashboardNavbar({
+  currentUser,
+  onMenuToggle,
+}: DashboardNavbarProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
@@ -35,24 +47,24 @@ export function DashboardNavbar({ currentUser, onMenuToggle }: DashboardNavbarPr
   };
 
   return (
-    <header className="fixed top-0 right-0 left-0 lg:left-64 z-30 h-16 bg-[#1a1408]/90 backdrop-blur-sm border-b border-amber-800/30">
-      <div className="flex items-center justify-between h-full px-4 sm:px-6">
+    <header className="fixed top-0 right-0 left-0 z-30 h-16 border-amber-800/30 border-b bg-[#1a1408]/90 backdrop-blur-sm lg:left-64">
+      <div className="flex h-full items-center justify-between px-4 sm:px-6">
         {/* Left: Hamburger (mobile) + Search */}
-        <div className="flex items-center gap-3 flex-1 max-w-xl">
+        <div className="flex max-w-xl flex-1 items-center gap-3">
           <button
-            onClick={onMenuToggle}
-            className="lg:hidden p-2 hover:bg-white/5 rounded-lg transition-colors"
             aria-label="Toggle sidebar"
+            className="rounded-lg p-2 transition-colors hover:bg-white/5 lg:hidden"
+            onClick={onMenuToggle}
           >
-            <Menu className="w-5 h-5 text-gray-400" />
+            <Menu className="h-5 w-5 text-gray-400" />
           </button>
 
-          <div className="relative flex-1 hidden sm:block">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <div className="relative hidden flex-1 sm:block">
+            <Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 transform text-gray-400" />
             <input
-              type="text"
+              className="h-10 w-full rounded-lg border border-purple-900/30 bg-white/5 pr-4 pl-10 text-white placeholder-gray-400 focus:border-purple-600/50 focus:outline-none focus:ring-1 focus:ring-purple-600/30"
               placeholder="Search"
-              className="w-full h-10 pl-10 pr-4 bg-white/5 border border-purple-900/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-600/50 focus:ring-1 focus:ring-purple-600/30"
+              type="text"
             />
           </div>
         </div>
@@ -60,61 +72,84 @@ export function DashboardNavbar({ currentUser, onMenuToggle }: DashboardNavbarPr
         {/* Right Side */}
         <div className="flex items-center gap-2 sm:gap-4">
           {/* Notifications */}
-          <button className="relative p-2 hover:bg-white/5 rounded-lg transition-colors">
-            <Bell className="w-5 h-5 text-gray-400 hover:text-white" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+          <button className="relative rounded-lg p-2 transition-colors hover:bg-white/5">
+            <Bell className="h-5 w-5 text-gray-400 hover:text-white" />
+            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500" />
           </button>
 
           {/* Online Status — hidden on mobile */}
-          <div className="hidden sm:flex items-center gap-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-            <span className="text-sm text-gray-400">Online</span>
+          <div className="hidden items-center gap-2 sm:flex">
+            <div className="h-2 w-2 rounded-full bg-green-500" />
+            <span className="text-gray-400 text-sm">Online</span>
           </div>
 
           {/* Profile Dropdown */}
           {mounted ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 p-1 hover:bg-white/5 rounded-lg transition-colors">
+                <button className="flex items-center gap-2 rounded-lg p-1 transition-colors hover:bg-white/5">
                   {currentUser.image ? (
                     <img
-                      src={currentUser.image}
                       alt={currentUser.name}
-                      className="w-8 h-8 rounded-full object-cover border-2 border-purple-500"
+                      className="h-8 w-8 rounded-full border-2 border-purple-500 object-cover"
+                      src={currentUser.image}
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center">
-                      <User className="w-5 h-5 text-white" />
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-purple-600 to-pink-600">
+                      <User className="h-5 w-5 text-white" />
                     </div>
                   )}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 bg-[#1a1a1a] border-purple-900/30">
+              <DropdownMenuContent
+                align="end"
+                className="w-56 border-purple-900/30 bg-[#1a1a1a]"
+              >
                 <DropdownMenuLabel className="text-white">
                   <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-semibold">{currentUser.name}</p>
-                    <p className="text-xs text-gray-400 font-normal">{currentUser.email}</p>
+                    <p className="font-semibold text-sm">{currentUser.name}</p>
+                    <p className="font-normal text-gray-400 text-xs">
+                      {currentUser.email}
+                    </p>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-purple-900/30" />
 
                 {currentUser.role !== "admin" && (
                   <>
-                    <DropdownMenuItem asChild className="text-gray-300 focus:text-white focus:bg-purple-600/20">
-                      <Link href="/dashboard/profile" className="flex items-center">
-                        <Eye className="w-4 h-4 mr-2" />
+                    <DropdownMenuItem
+                      asChild
+                      className="text-gray-300 focus:bg-purple-600/20 focus:text-white"
+                    >
+                      <Link
+                        className="flex items-center"
+                        href="/dashboard/profile"
+                      >
+                        <Eye className="mr-2 h-4 w-4" />
                         View Profile
                       </Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="text-gray-300 focus:text-white focus:bg-purple-600/20">
-                      <Link href="/dashboard/edit-profile" className="flex items-center">
-                        <UserCircle className="w-4 h-4 mr-2" />
+                    <DropdownMenuItem
+                      asChild
+                      className="text-gray-300 focus:bg-purple-600/20 focus:text-white"
+                    >
+                      <Link
+                        className="flex items-center"
+                        href="/dashboard/edit-profile"
+                      >
+                        <UserCircle className="mr-2 h-4 w-4" />
                         Edit Profile
                       </Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem asChild className="text-gray-300 focus:text-white focus:bg-purple-600/20">
-                      <Link href="/dashboard/change-password" className="flex items-center">
-                        <Lock className="w-4 h-4 mr-2" />
+                    <DropdownMenuItem
+                      asChild
+                      className="text-gray-300 focus:bg-purple-600/20 focus:text-white"
+                    >
+                      <Link
+                        className="flex items-center"
+                        href="/dashboard/change-password"
+                      >
+                        <Lock className="mr-2 h-4 w-4" />
                         Change Password
                       </Link>
                     </DropdownMenuItem>
@@ -122,25 +157,31 @@ export function DashboardNavbar({ currentUser, onMenuToggle }: DashboardNavbarPr
                   </>
                 )}
 
-                <DropdownMenuItem asChild className="text-gray-300 focus:text-white focus:bg-purple-600/20">
-                  <Link href="/dashboard/settings" className="flex items-center">
-                    <Settings className="w-4 h-4 mr-2" />
+                <DropdownMenuItem
+                  asChild
+                  className="text-gray-300 focus:bg-purple-600/20 focus:text-white"
+                >
+                  <Link
+                    className="flex items-center"
+                    href="/dashboard/settings"
+                  >
+                    <Settings className="mr-2 h-4 w-4" />
                     Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-purple-900/30" />
                 <DropdownMenuItem
+                  className="cursor-pointer text-red-400 focus:bg-red-600/20 focus:text-red-300"
                   onClick={handleSignOut}
-                  className="text-red-400 focus:text-red-300 focus:bg-red-600/20 cursor-pointer"
                 >
-                  <LogOut className="w-4 h-4 mr-2" />
+                  <LogOut className="mr-2 h-4 w-4" />
                   Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center animate-pulse">
-              <User className="w-5 h-5 text-white" />
+            <div className="flex h-8 w-8 animate-pulse items-center justify-center rounded-full bg-gradient-to-br from-purple-600 to-pink-600">
+              <User className="h-5 w-5 text-white" />
             </div>
           )}
         </div>

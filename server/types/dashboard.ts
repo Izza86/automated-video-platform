@@ -6,16 +6,16 @@
  */
 
 import type {
-  FullVideoMetadata,
-  DashboardCard,
   DashboardAnalysisResponse,
+  DashboardCard,
+  FullVideoMetadata,
 } from "./index";
 
 /** Build a complete dashboard response from analysis results. */
 export function buildDashboardResponse(
   meta: FullVideoMetadata,
   videoId: string,
-  filename: string,
+  filename: string
 ): DashboardAnalysisResponse {
   return {
     videoId,
@@ -48,7 +48,10 @@ function buildCards(meta: FullVideoMetadata): DashboardCard[] {
     details: [
       { label: "Hard cuts", value: sd.hardCutCount },
       { label: "Gradual transitions", value: sd.gradualTransitionCount },
-      { label: "Dominant type", value: sd.dominantTransitionType.replace("_", " ") },
+      {
+        label: "Dominant type",
+        value: sd.dominantTransitionType.replace("_", " "),
+      },
       { label: "Analysis time", value: `${sd.processingMs}ms` },
     ],
   });
@@ -66,7 +69,9 @@ function buildCards(meta: FullVideoMetadata): DashboardCard[] {
   })();
 
   // Segment distribution summary string e.g. "3 normal · 2 fast · 1 freeze"
-  const distParts = (Object.entries(mo.segmentDistribution) as [string, number][])
+  const distParts = (
+    Object.entries(mo.segmentDistribution) as [string, number][]
+  )
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => `${v} ${k}`);
@@ -127,8 +132,14 @@ function buildCards(meta: FullVideoMetadata): DashboardCard[] {
     details: [
       { label: "First beat", value: `${au.firstBeatSec.toFixed(2)}s` },
       { label: "Beat density", value: `${au.beatDensity.toFixed(2)} b/s` },
-      { label: "Avg intensity", value: `${(au.avgBeatIntensity * 100).toFixed(0)}%` },
-      { label: "Peak intensity", value: `${(au.peakBeatIntensity * 100).toFixed(0)}%` },
+      {
+        label: "Avg intensity",
+        value: `${(au.avgBeatIntensity * 100).toFixed(0)}%`,
+      },
+      {
+        label: "Peak intensity",
+        value: `${(au.peakBeatIntensity * 100).toFixed(0)}%`,
+      },
       { label: "Peak dB", value: `${au.peakDb.toFixed(1)} dB` },
       { label: "Mean volume", value: `${(au.meanVolume * 100).toFixed(0)}%` },
       { label: "Rhythm regions", value: regionParts.join(" · ") || "—" },
@@ -151,7 +162,10 @@ function buildCards(meta: FullVideoMetadata): DashboardCard[] {
       { label: "Contrast", value: cg.contrast.toFixed(3) },
       { label: "Saturation", value: cg.saturation.toFixed(3) },
       { label: "Sharpness", value: cg.sharpness.toFixed(3) },
-      { label: "Vignette", value: `${cg.vignetteLabel} (${cg.vignette.toFixed(2)})` },
+      {
+        label: "Vignette",
+        value: `${cg.vignetteLabel} (${cg.vignette.toFixed(2)})`,
+      },
       { label: "Lens blur", value: cg.lensBlurLabel },
       { label: "Grain", value: cg.grainLabel },
       { label: "Analysis time", value: `${cg.processingMs}ms` },

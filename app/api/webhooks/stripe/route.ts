@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
-import { db } from "@/db/drizzle";
-import { subscription, payment, subscriptionPlan } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import Stripe from "stripe";
+import { type NextRequest, NextResponse } from "next/server";
+import type Stripe from "stripe";
+import { db } from "@/db/drizzle";
+import { payment, subscription, subscriptionPlan } from "@/db/schema";
+import { stripe } from "@/lib/stripe";
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
@@ -24,10 +24,7 @@ export async function POST(req: NextRequest) {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
   } catch (error) {
     console.error("Webhook signature verification failed:", error);
-    return NextResponse.json(
-      { error: "Invalid signature" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
   try {
@@ -81,7 +78,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const userId = session.metadata?.userId;
   const planId = session.metadata?.planId;
 
-  if (!userId || !planId) {
+  if (!(userId && planId)) {
     console.error("Missing userId or planId in checkout session");
     return;
   }
@@ -90,7 +87,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   console.log(`Checkout completed for user ${userId}`);
 }
 
-async function handleSubscriptionUpdate(stripeSubscription: Stripe.Subscription) {
+async function handleSubscriptionUpdate(
+  stripeSubscription: Stripe.Subscription
+) {
   const userId = stripeSubscription.metadata?.userId;
 
   if (!userId) {
@@ -124,8 +123,12 @@ async function handleSubscriptionUpdate(stripeSubscription: Stripe.Subscription)
     planId: plan.id,
     stripeSubscriptionId: stripeSubscription.id,
     status: stripeSubscription.status as any,
-    currentPeriodStart: new Date(stripeSubscription.items.data[0]?.current_period_start * 1000),
-    currentPeriodEnd: new Date(stripeSubscription.items.data[0]?.current_period_end * 1000),
+    currentPeriodStart: new Date(
+      stripeSubscription.items.data[0]?.current_period_start * 1000
+    ),
+    currentPeriodEnd: new Date(
+      stripeSubscription.items.data[0]?.current_period_end * 1000
+    ),
     cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
     canceledAt: stripeSubscription.canceled_at
       ? new Date(stripeSubscription.canceled_at * 1000)
@@ -154,7 +157,9 @@ async function handleSubscriptionUpdate(stripeSubscription: Stripe.Subscription)
   }
 }
 
-async function handleSubscriptionDeleted(stripeSubscription: Stripe.Subscription) {
+async function handleSubscriptionDeleted(
+  stripeSubscription: Stripe.Subscription
+) {
   await db
     .update(subscription)
     .set({
@@ -189,9 +194,10 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
   }
 
   // Record payment — use first payment's payment_intent if available
-  const paymentIntentId = (invoice as any).payment_intent
-    ?? invoice.payments?.data?.[0]?.payment?.payment_intent
-    ?? crypto.randomUUID();
+  const paymentIntentId =
+    (invoice as any).payment_intent ??
+    invoice.payments?.data?.[0]?.payment?.payment_intent ??
+    crypto.randomUUID();
 
   await db.insert(payment).values({
     id: crypto.randomUUID(),
@@ -237,9 +243,10 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
     .where(eq(subscription.id, sub.id));
 
   // Record failed payment
-  const paymentIntentId = (invoice as any).payment_intent
-    ?? invoice.payments?.data?.[0]?.payment?.payment_intent
-    ?? crypto.randomUUID();
+  const paymentIntentId =
+    (invoice as any).payment_intent ??
+    invoice.payments?.data?.[0]?.payment?.payment_intent ??
+    crypto.randomUUID();
 
   await db.insert(payment).values({
     id: crypto.randomUUID(),

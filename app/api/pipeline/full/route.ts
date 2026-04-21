@@ -9,8 +9,11 @@
  * Omit all params (or pass none) to run everything.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { analyzeVideo, analyzePartial } from "../../../../server/pipeline/orchestrator";
+import { type NextRequest, NextResponse } from "next/server";
+import {
+  analyzePartial,
+  analyzeVideo,
+} from "../../../../server/pipeline/orchestrator";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
@@ -23,14 +26,16 @@ export async function POST(request: NextRequest) {
     if (!file || file.size === 0) {
       return NextResponse.json(
         { error: 'Missing video — send a multipart field named "video"' },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const filename = file.name || "video.mp4";
 
-    console.log(`[pipeline/full] Analysing "${filename}" (${(buffer.length / 1024 / 1024).toFixed(1)} MB)`);
+    console.log(
+      `[pipeline/full] Analysing "${filename}" (${(buffer.length / 1024 / 1024).toFixed(1)} MB)`
+    );
 
     // Check for partial-run query params
     const params = request.nextUrl.searchParams;
@@ -50,7 +55,7 @@ export async function POST(request: NextRequest) {
           audio: params.get("audio") === "1",
           colorGrading: params.get("color") === "1",
         },
-        filename,
+        filename
       );
     } else {
       result = await analyzeVideo(buffer, filename);
@@ -62,9 +67,14 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error("[pipeline/full] error:", err);
+    // Extract pipeline summary from error if the orchestrator attached one
+    const pipelineSummary = (err as any)?.pipelineSummary ?? undefined;
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      {
+        error: err instanceof Error ? err.message : String(err),
+        pipelineSummary,
+      },
+      { status: 500 }
     );
   }
 }

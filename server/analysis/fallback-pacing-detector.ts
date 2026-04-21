@@ -9,7 +9,11 @@
  * Returns enhanced shot boundaries for StyleDNA integration.
  */
 
-import type { MotionAnalysisResult, ColorGradingResult, ShotBoundary } from "../types";
+import type {
+  ColorGradingResult,
+  MotionAnalysisResult,
+  ShotBoundary,
+} from "../types";
 import {
   detectFallbackPacing,
   type MotionMicroCutDetectionResult,
@@ -40,9 +44,11 @@ export function orchestrateFallbackPacing(
   originalBoundaries: ShotBoundary[],
   motionAnalysis: MotionAnalysisResult,
   colorGrading: ColorGradingResult,
-  videoDuration: number,
+  videoDuration: number
 ): FallbackPacingResult {
-  const hardCutCount = originalBoundaries.filter((b) => b.type === "hard_cut").length;
+  const hardCutCount = originalBoundaries.filter(
+    (b) => b.type === "hard_cut"
+  ).length;
 
   // Trigger fallback if ≤1 hard cuts detected
   const fallbackTriggered = hardCutCount <= 1;
@@ -100,7 +106,7 @@ export function orchestrateFallbackPacing(
   const deduped: ShotBoundary[] = [];
   for (const boundary of merged) {
     const existingIdx = deduped.findIndex(
-      (b) => Math.abs(b.timestamp_sec - boundary.timestamp_sec) < 0.05,
+      (b) => Math.abs(b.timestamp_sec - boundary.timestamp_sec) < 0.05
     );
     if (existingIdx < 0) {
       deduped.push(boundary);

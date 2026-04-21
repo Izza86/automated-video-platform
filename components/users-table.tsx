@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Loader2, Shield, User as UserIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Shield, User as UserIcon, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -11,7 +12,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { getAllUsers } from "@/server/admin";
 import { UserActions } from "./user-actions";
 
@@ -46,19 +46,19 @@ export function UsersTable() {
   }, [refreshKey]);
 
   const handleRefresh = () => {
-    setRefreshKey(prev => prev + 1);
+    setRefreshKey((prev) => prev + 1);
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+        <Loader2 className="h-8 w-8 animate-spin text-purple-400" />
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-purple-600/20 bg-black/40 overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-purple-600/20 bg-black/40">
       <Table>
         <TableHeader>
           <TableRow className="border-purple-600/20 hover:bg-purple-900/10">
@@ -67,23 +67,28 @@ export function UsersTable() {
             <TableHead className="text-purple-300">Role</TableHead>
             <TableHead className="text-purple-300">Status</TableHead>
             <TableHead className="text-purple-300">Joined</TableHead>
-            <TableHead className="text-purple-300 text-right">Actions</TableHead>
+            <TableHead className="text-right text-purple-300">
+              Actions
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {users.map((user) => (
-            <TableRow key={user.id} className="border-purple-600/20 hover:bg-purple-900/10">
+            <TableRow
+              className="border-purple-600/20 hover:bg-purple-900/10"
+              key={user.id}
+            >
               <TableCell className="font-medium">
                 <div className="flex items-center gap-3">
                   {user.image ? (
                     <img
-                      src={user.image}
                       alt={user.name}
-                      className="w-8 h-8 rounded-full object-cover"
+                      className="h-8 w-8 rounded-full object-cover"
+                      src={user.image}
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center">
-                      <UserIcon className="w-4 h-4" />
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-600">
+                      <UserIcon className="h-4 w-4" />
                     </div>
                   )}
                   <span className="text-white">{user.name}</span>
@@ -93,7 +98,7 @@ export function UsersTable() {
               <TableCell>
                 {user.role === "admin" ? (
                   <Badge className="bg-yellow-600 text-black">
-                    <Shield className="w-3 h-3 mr-1" />
+                    <Shield className="mr-1 h-3 w-3" />
                     Admin
                   </Badge>
                 ) : (
@@ -101,7 +106,11 @@ export function UsersTable() {
                 )}
               </TableCell>
               <TableCell>
-                <Badge className={user.emailVerified ? "bg-green-600" : "bg-gray-600"}>
+                <Badge
+                  className={
+                    user.emailVerified ? "bg-green-600" : "bg-gray-600"
+                  }
+                >
                   {user.emailVerified ? "Verified" : "Unverified"}
                 </Badge>
               </TableCell>
@@ -109,12 +118,12 @@ export function UsersTable() {
                 {new Date(user.createdAt).toLocaleDateString()}
               </TableCell>
               <TableCell className="text-right">
-                <UserActions 
-                  userId={user.id}
-                  userName={user.name}
-                  userEmail={user.email}
+                <UserActions
                   currentRole={user.role}
                   onActionComplete={handleRefresh}
+                  userEmail={user.email}
+                  userId={user.id}
+                  userName={user.name}
                 />
               </TableCell>
             </TableRow>
@@ -122,9 +131,7 @@ export function UsersTable() {
         </TableBody>
       </Table>
       {users.length === 0 && (
-        <div className="text-center py-12 text-white/60">
-          No users found
-        </div>
+        <div className="py-12 text-center text-white/60">No users found</div>
       )}
     </div>
   );

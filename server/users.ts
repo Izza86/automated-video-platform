@@ -1,9 +1,9 @@
 "use server";
 
-import { eq, inArray, not } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { db } from "@/db/drizzle";
 import { user } from "@/db/schema";
 import { auth } from "@/lib/auth";
@@ -51,10 +51,15 @@ export const getCurrentUser = async () => {
     // while FFmpeg is running) instead of crashing the Dashboard Layout.
     const msg = error instanceof Error ? error.message : String(error);
     const isTimeout =
-      /timeout|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|connection terminated|too many clients/i.test(msg);
+      /timeout|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|connection terminated|too many clients/i.test(
+        msg
+      );
 
     if (isTimeout) {
-      console.warn("[getCurrentUser] DB query timed out — returning null so the layout can degrade gracefully:", msg);
+      console.warn(
+        "[getCurrentUser] DB query timed out — returning null so the layout can degrade gracefully:",
+        msg
+      );
       return null;
     }
 
@@ -67,7 +72,7 @@ export const getCurrentUser = async () => {
 export const isAdmin = async () => {
   const result = await getCurrentUser();
   if (!result) return false;
-  return result.currentUser.role === 'admin';
+  return result.currentUser.role === "admin";
 };
 
 // Get all users (admin only)
@@ -78,9 +83,9 @@ export const getAllUsers = async () => {
       return { success: false, message: "Not authenticated.", users: [] };
     }
     const { currentUser } = authData;
-    
+
     // Check if current user is admin
-    if (currentUser.role !== 'admin') {
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Only admins can view all users.",
@@ -120,8 +125,8 @@ export const updateUserRole = async (userId: string, newRole: string) => {
     const authData = await getCurrentUser();
     if (!authData) return { success: false, message: "Not authenticated." };
     const { currentUser } = authData;
-    
-    if (currentUser.role !== 'admin') {
+
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Only admins can update user roles.",
@@ -136,7 +141,10 @@ export const updateUserRole = async (userId: string, newRole: string) => {
       };
     }
 
-    await db.update(user).set({ role: newRole as "admin" | "user" }).where(eq(user.id, userId));
+    await db
+      .update(user)
+      .set({ role: newRole as "admin" | "user" })
+      .where(eq(user.id, userId));
 
     return {
       success: true,
@@ -162,8 +170,8 @@ export const updateUserByAdmin = async (
     const authData = await getCurrentUser();
     if (!authData) return { success: false, message: "Not authenticated." };
     const { currentUser } = authData;
-    
-    if (currentUser.role !== 'admin') {
+
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Only admins can update user information.",
@@ -171,7 +179,7 @@ export const updateUserByAdmin = async (
     }
 
     // Validate inputs
-    if (!name || !email) {
+    if (!(name && email)) {
       return {
         success: false,
         message: "Name and email are required.",
@@ -200,11 +208,14 @@ export const updateUserByAdmin = async (
     }
 
     // Update user information
-    await db.update(user).set({ 
-      name,
-      email,
-      role: role as "admin" | "user"
-    }).where(eq(user.id, userId));
+    await db
+      .update(user)
+      .set({
+        name,
+        email,
+        role: role as "admin" | "user",
+      })
+      .where(eq(user.id, userId));
 
     return {
       success: true,
@@ -225,8 +236,8 @@ export const deleteUser = async (userId: string) => {
     const authData = await getCurrentUser();
     if (!authData) return { success: false, message: "Not authenticated." };
     const { currentUser } = authData;
-    
-    if (currentUser.role !== 'admin') {
+
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Only admins can delete users.",
@@ -257,13 +268,17 @@ export const deleteUser = async (userId: string) => {
 };
 
 // Send email to user (admin only)
-export const sendEmailToUser = async (userId: string, subject: string, message: string) => {
+export const sendEmailToUser = async (
+  userId: string,
+  subject: string,
+  message: string
+) => {
   try {
     const authData = await getCurrentUser();
     if (!authData) return { success: false, message: "Not authenticated." };
     const { currentUser } = authData;
-    
-    if (currentUser.role !== 'admin') {
+
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Only admins can send emails to users.",
@@ -283,7 +298,9 @@ export const sendEmailToUser = async (userId: string, subject: string, message: 
 
     // Here you would integrate with your email service (like Resend, SendGrid, etc.)
     // For now, we'll just return a success message
-    console.log(`Sending email to ${targetUser.email}: ${subject} - ${message}`);
+    console.log(
+      `Sending email to ${targetUser.email}: ${subject} - ${message}`
+    );
 
     return {
       success: true,
@@ -300,17 +317,17 @@ export const sendEmailToUser = async (userId: string, subject: string, message: 
 
 // Add new user (admin only)
 export const addNewUser = async (
-  name: string, 
-  email: string, 
-  password: string, 
+  name: string,
+  email: string,
+  password: string,
   role: string
 ) => {
   try {
     const authData = await getCurrentUser();
     if (!authData) return { success: false, message: "Not authenticated." };
     const { currentUser } = authData;
-    
-    if (currentUser.role !== 'admin') {
+
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Only admins can add new users.",
@@ -318,7 +335,7 @@ export const addNewUser = async (
     }
 
     // Validate inputs
-    if (!name || !email || !password) {
+    if (!(name && email && password)) {
       return {
         success: false,
         message: "All fields are required.",
@@ -364,13 +381,16 @@ export const addNewUser = async (
     });
 
     // Update role if not default user
-    if (role !== 'user') {
+    if (role !== "user") {
       const newUser = await db.query.user.findFirst({
         where: eq(user.email, email),
       });
 
       if (newUser) {
-        await db.update(user).set({ role: role as "admin" | "user" }).where(eq(user.id, newUser.id));
+        await db
+          .update(user)
+          .set({ role: role as "admin" | "user" })
+          .where(eq(user.id, newUser.id));
       }
     }
 
@@ -393,16 +413,16 @@ export const promoteToAdmin = async (userId: string) => {
     const authData = await getCurrentUser();
     if (!authData) return { success: false, message: "Not authenticated." };
     const { currentUser } = authData;
-    
+
     // Check if current user is admin (for non-initial setup)
-    if (currentUser.role !== 'admin') {
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Only admins can promote users.",
       };
     }
 
-    await db.update(user).set({ role: 'admin' }).where(eq(user.id, userId));
+    await db.update(user).set({ role: "admin" }).where(eq(user.id, userId));
 
     return {
       success: true,
@@ -448,7 +468,7 @@ export const signUp = async (
 ) => {
   try {
     // Server-side validation
-    if (!email || !password || !username) {
+    if (!(email && password && username)) {
       return {
         success: false,
         message: "All fields are required.",
@@ -512,7 +532,8 @@ export const signUp = async (
 
     return {
       success: true,
-      message: "Account created successfully! Welcome to Automated Video Editor.",
+      message:
+        "Account created successfully! Welcome to Automated Video Editor.",
     };
   } catch (error) {
     const e = error as Error;

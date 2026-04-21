@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { DashboardSidebar } from "@/components/dashboard-sidebar";
+import { useCallback, useState } from "react";
 import { DashboardNavbar } from "@/components/dashboard-navbar";
+import { DashboardSidebar } from "@/components/dashboard-sidebar";
 
 interface DashboardShellProps {
   isAdmin: boolean;
@@ -10,7 +10,11 @@ interface DashboardShellProps {
   children: React.ReactNode;
 }
 
-export function DashboardShell({ isAdmin, currentUser, children }: DashboardShellProps) {
+export function DashboardShell({
+  isAdmin,
+  currentUser,
+  children,
+}: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const toggleSidebar = useCallback(() => setSidebarOpen((prev) => !prev), []);
@@ -18,9 +22,16 @@ export function DashboardShell({ isAdmin, currentUser, children }: DashboardShel
 
   return (
     <div className="min-h-screen bg-[#1a1408]">
-      <DashboardSidebar isAdmin={isAdmin} isOpen={sidebarOpen} onClose={closeSidebar} />
-      <div className="lg:ml-64 transition-all duration-300">
-        <DashboardNavbar currentUser={currentUser} onMenuToggle={toggleSidebar} />
+      <DashboardSidebar
+        isAdmin={isAdmin}
+        isOpen={sidebarOpen}
+        onClose={closeSidebar}
+      />
+      <div className="transition-all duration-300 lg:ml-64">
+        <DashboardNavbar
+          currentUser={currentUser}
+          onMenuToggle={toggleSidebar}
+        />
         {children}
       </div>
     </div>

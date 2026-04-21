@@ -10,8 +10,8 @@
  * Include ?json=1 query param to receive JSON metadata instead.
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import * as fs from "node:fs";
+import { type NextRequest, NextResponse } from "next/server";
 import { analyzeAndTransfer } from "../../../../server/pipeline/orchestrator";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +26,13 @@ export async function POST(request: NextRequest) {
     if (!refFile || refFile.size === 0) {
       return NextResponse.json(
         { error: 'Missing reference video — send a field named "reference"' },
-        { status: 400 },
+        { status: 400 }
       );
     }
     if (!tgtFile || tgtFile.size === 0) {
       return NextResponse.json(
         { error: 'Missing target video — send a field named "target"' },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -41,27 +41,30 @@ export async function POST(request: NextRequest) {
 
     console.log(
       `[editor/transfer] ref=${(refBuffer.length / 1024 / 1024).toFixed(1)}MB` +
-      ` tgt=${(tgtBuffer.length / 1024 / 1024).toFixed(1)}MB`,
+        ` tgt=${(tgtBuffer.length / 1024 / 1024).toFixed(1)}MB`
     );
 
     const { analysis, transfer } = await analyzeAndTransfer(
       refBuffer,
       tgtBuffer,
-      { keepOutput: true },
+      { keepOutput: true }
     );
 
     // Return JSON metadata only?
     const wantJson = request.nextUrl.searchParams.get("json") === "1";
     if (wantJson || !transfer.success) {
-      return NextResponse.json({
-        success: transfer.success,
-        analysis: analysis,
-        transfer: {
-          filterGraph: transfer.filterGraphSummary,
-          processingMs: transfer.processingMs,
-          error: transfer.error,
+      return NextResponse.json(
+        {
+          success: transfer.success,
+          analysis,
+          transfer: {
+            filterGraph: transfer.filterGraphSummary,
+            processingMs: transfer.processingMs,
+            error: transfer.error,
+          },
         },
-      }, { status: transfer.success ? 200 : 500 });
+        { status: transfer.success ? 200 : 500 }
+      );
     }
 
     // Stream binary MP4 back
@@ -69,7 +72,11 @@ export async function POST(request: NextRequest) {
     const outputBuffer = await fs.promises.readFile(outputPath);
 
     // Clean up
-    try { fs.unlinkSync(outputPath); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(outputPath);
+    } catch {
+      /* ignore */
+    }
 
     return new NextResponse(outputBuffer, {
       status: 200,
@@ -83,7 +90,7 @@ export async function POST(request: NextRequest) {
     console.error("[editor/transfer] error:", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

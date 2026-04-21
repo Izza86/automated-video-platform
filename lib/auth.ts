@@ -2,15 +2,17 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { lastLoginMethod } from "better-auth/plugins";
+import { Resend } from "resend";
 import { db } from "@/db/drizzle";
 import { schema } from "@/db/schema";
-import { Resend } from "resend";
 
 const appUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 
 export const auth = betterAuth({
   baseURL: appUrl,
-  trustedOrigins: [appUrl, process.env.NEXT_PUBLIC_APP_URL || ""].filter(Boolean),
+  trustedOrigins: [appUrl, process.env.NEXT_PUBLIC_APP_URL || ""].filter(
+    Boolean
+  ),
   secret: process.env.BETTER_AUTH_SECRET as string,
   socialProviders: {
     google: {
@@ -26,13 +28,13 @@ export const auth = betterAuth({
       try {
         console.log("🔐 Sending password reset email to:", user.email);
         console.log("🔑 Resend API Key exists:", !!process.env.RESEND_API_KEY);
-        
+
         const resend = new Resend(process.env.RESEND_API_KEY);
-        
+
         const { data, error } = await resend.emails.send({
           from: `${process.env.EMAIL_SENDER_NAME} <${process.env.EMAIL_SENDER_ADDRESS}>`,
           to: user.email,
-          subject: 'Reset Your Password',
+          subject: "Reset Your Password",
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <div style="background: linear-gradient(135deg, #3b0764 0%, #5b21b6 100%); padding: 40px; text-align: center; border-radius: 10px 10px 0 0;">
@@ -62,7 +64,7 @@ export const auth = betterAuth({
           console.error("❌ Failed to send password reset email:", error);
           throw error;
         }
-        
+
         console.log("✅ Password reset email sent successfully:", data);
       } catch (error) {
         console.error("❌ Error in sendResetPassword:", error);
@@ -73,7 +75,7 @@ export const auth = betterAuth({
   emailVerification: {
     sendOnSignUp: false, // Disabled - no verification email sent
     autoSignInAfterVerification: true,
-    expiresIn: 86400, // Token valid for 24 hours (1 day) = 86400 seconds
+    expiresIn: 86_400, // Token valid for 24 hours (1 day) = 86400 seconds
     sendVerificationEmail: async ({ user, url }) => {
       // Email verification disabled - just log for development
       console.log("📧 Email verification skipped for:", user.email);
@@ -84,8 +86,5 @@ export const auth = betterAuth({
     provider: "pg",
     schema,
   }),
-  plugins: [
-    lastLoginMethod(),
-    nextCookies(),
-  ],
+  plugins: [lastLoginMethod(), nextCookies()],
 });

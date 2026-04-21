@@ -1,11 +1,18 @@
 "use server";
 
+import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 /**
  * Dashboard data fetching — real DB queries replacing hardcoded fake data.
  */
 import { db } from "@/db/drizzle";
-import { user, project, subscription, usage, payment, session } from "@/db/schema";
-import { count, eq, desc, sql, and, gte } from "drizzle-orm";
+import {
+  payment,
+  project,
+  session,
+  subscription,
+  usage,
+  user,
+} from "@/db/schema";
 
 // ── Admin Dashboard Stats ─────────────────────────────────────────────────
 export async function getAdminDashboardStats() {
@@ -20,9 +27,7 @@ export async function getAdminDashboardStats() {
     const [activeSubCount] = await db
       .select({ count: count() })
       .from(subscription)
-      .where(
-        sql`${subscription.status} IN ('active', 'trialing')`
-      );
+      .where(sql`${subscription.status} IN ('active', 'trialing')`);
 
     // Videos created this month
     const now = new Date();
@@ -39,7 +44,9 @@ export async function getAdminDashboardStats() {
     // Revenue this month (from payments table)
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const [monthlyRevenue] = await db
-      .select({ total: sql<number>`COALESCE(SUM(CAST(${payment.amount} AS NUMERIC)), 0)` })
+      .select({
+        total: sql<number>`COALESCE(SUM(CAST(${payment.amount} AS NUMERIC)), 0)`,
+      })
       .from(payment)
       .where(
         and(
@@ -163,7 +170,10 @@ export async function getAnalyticsData(userId?: string) {
 
     // Total videos all-time
     const [totalVideos] = userId
-      ? await db.select({ count: count() }).from(project).where(eq(project.userId, userId))
+      ? await db
+          .select({ count: count() })
+          .from(project)
+          .where(eq(project.userId, userId))
       : await db.select({ count: count() }).from(project);
 
     return {

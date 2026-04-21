@@ -1,11 +1,25 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, pgEnum, pgTable, text, timestamp, jsonb, integer, decimal, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  decimal,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 // User role enum: Admin and Non-Admin
 export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
 
 // Project type enum
-export const projectTypeEnum = pgEnum("project_type", ["template", "reference-target"]);
+export const projectTypeEnum = pgEnum("project_type", [
+  "template",
+  "reference-target",
+]);
 
 // Subscription status enum
 export const subscriptionStatusEnum = pgEnum("subscription_status", [
@@ -15,50 +29,60 @@ export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "trialing",
   "incomplete",
   "incomplete_expired",
-  "paused"
+  "paused",
 ]);
 
 // Plan interval enum
 export const planIntervalEnum = pgEnum("plan_interval", ["month", "year"]);
 
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified")
-    .$defaultFn(() => false)
-    .notNull(),
-  image: text("image"),
-  profilePhoto: text("profile_photo"),
-  role: userRoleEnum("role").$defaultFn(() => "user").notNull(),
-  stripeCustomerId: text("stripe_customer_id"),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-}, (table) => ([
-  index("user_email_idx").on(table.email),
-  index("user_role_idx").on(table.role),
-  index("user_stripe_customer_idx").on(table.stripeCustomerId),
-]));
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified")
+      .$defaultFn(() => false)
+      .notNull(),
+    image: text("image"),
+    profilePhoto: text("profile_photo"),
+    role: userRoleEnum("role")
+      .$defaultFn(() => "user")
+      .notNull(),
+    stripeCustomerId: text("stripe_customer_id"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("user_email_idx").on(table.email),
+    index("user_role_idx").on(table.role),
+    index("user_stripe_customer_idx").on(table.stripeCustomerId),
+  ]
+);
 
-export const session = pgTable("session", {
-  id: text("id").primaryKey(),
-  expiresAt: timestamp("expires_at").notNull(),
-  token: text("token").notNull().unique(),
-  createdAt: timestamp("created_at").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-  ipAddress: text("ip_address"),
-  userAgent: text("user_agent"),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-}, (table) => ([
-  index("session_user_id_idx").on(table.userId),
-  index("session_token_idx").on(table.token),
-]));
+export const session = pgTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: timestamp("expires_at").notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    index("session_user_id_idx").on(table.userId),
+    index("session_token_idx").on(table.token),
+  ]
+);
 
 export const account = pgTable("account", {
   id: text("id").primaryKey(),
@@ -91,26 +115,30 @@ export const verification = pgTable("verification", {
   ),
 });
 
-export const project = pgTable("project", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  type: projectTypeEnum("type").notNull(),
-  videoUrl: text("video_url").notNull(),
-  thumbnail: text("thumbnail"),
-  metadata: jsonb("metadata"),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-}, (table) => ([
-  index("project_user_id_idx").on(table.userId),
-  index("project_created_at_idx").on(table.createdAt),
-]));
+export const project = pgTable(
+  "project",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    type: projectTypeEnum("type").notNull(),
+    videoUrl: text("video_url").notNull(),
+    thumbnail: text("thumbnail"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("project_user_id_idx").on(table.userId),
+    index("project_created_at_idx").on(table.createdAt),
+  ]
+);
 
 // Subscription plans table
 export const subscriptionPlan = pgTable("subscription_plan", {
@@ -122,7 +150,9 @@ export const subscriptionPlan = pgTable("subscription_plan", {
   interval: planIntervalEnum("interval").notNull(), // month or year
   videoLimit: integer("video_limit"), // null means unlimited
   features: jsonb("features").$type<string[]>(), // Array of features
-  isActive: boolean("is_active").$defaultFn(() => true).notNull(),
+  isActive: boolean("is_active")
+    .$defaultFn(() => true)
+    .notNull(),
   createdAt: timestamp("created_at")
     .$defaultFn(() => new Date())
     .notNull(),
@@ -131,69 +161,88 @@ export const subscriptionPlan = pgTable("subscription_plan", {
     .notNull(),
 });
 
-export const subscription = pgTable("subscription", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  planId: text("plan_id")
-    .notNull()
-    .references(() => subscriptionPlan.id),
-  stripeSubscriptionId: text("stripe_subscription_id").unique(),
-  status: subscriptionStatusEnum("status").notNull(),
-  currentPeriodStart: timestamp("current_period_start").notNull(),
-  currentPeriodEnd: timestamp("current_period_end").notNull(),
-  cancelAtPeriodEnd: boolean("cancel_at_period_end").$defaultFn(() => false).notNull(),
-  canceledAt: timestamp("canceled_at"),
-  trialStart: timestamp("trial_start"),
-  trialEnd: timestamp("trial_end"),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-}, (table) => ([
-  index("subscription_user_id_idx").on(table.userId),
-  index("subscription_stripe_id_idx").on(table.stripeSubscriptionId),
-  index("subscription_status_idx").on(table.status),
-]));
+export const subscription = pgTable(
+  "subscription",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => subscriptionPlan.id),
+    stripeSubscriptionId: text("stripe_subscription_id").unique(),
+    status: subscriptionStatusEnum("status").notNull(),
+    currentPeriodStart: timestamp("current_period_start").notNull(),
+    currentPeriodEnd: timestamp("current_period_end").notNull(),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end")
+      .$defaultFn(() => false)
+      .notNull(),
+    canceledAt: timestamp("canceled_at"),
+    trialStart: timestamp("trial_start"),
+    trialEnd: timestamp("trial_end"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("subscription_user_id_idx").on(table.userId),
+    index("subscription_stripe_id_idx").on(table.stripeSubscriptionId),
+    index("subscription_status_idx").on(table.status),
+  ]
+);
 
-export const usage = pgTable("usage", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  month: integer("month").notNull(),
-  year: integer("year").notNull(),
-  videosCreated: integer("videos_created").$defaultFn(() => 0).notNull(),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-}, (table) => ([
-  uniqueIndex("usage_user_month_year_idx").on(table.userId, table.month, table.year),
-]));
+export const usage = pgTable(
+  "usage",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    month: integer("month").notNull(),
+    year: integer("year").notNull(),
+    videosCreated: integer("videos_created")
+      .$defaultFn(() => 0)
+      .notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("usage_user_month_year_idx").on(
+      table.userId,
+      table.month,
+      table.year
+    ),
+  ]
+);
 
-export const payment = pgTable("payment", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  subscriptionId: text("subscription_id")
-    .references(() => subscription.id),
-  stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
-  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  currency: text("currency").notNull().$defaultFn(() => "usd"),
-  status: text("status").notNull(),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-}, (table) => ([
-  index("payment_user_id_idx").on(table.userId),
-]));
+export const payment = pgTable(
+  "payment",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    subscriptionId: text("subscription_id").references(() => subscription.id),
+    stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
+    amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+    currency: text("currency")
+      .notNull()
+      .$defaultFn(() => "usd"),
+    status: text("status").notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [index("payment_user_id_idx").on(table.userId)]
+);
 
 export type User = typeof user.$inferSelect;
 export type Project = typeof project.$inferSelect;
@@ -226,7 +275,10 @@ export const projectRelations = relations(project, ({ one }) => ({
 
 export const subscriptionRelations = relations(subscription, ({ one }) => ({
   user: one(user, { fields: [subscription.userId], references: [user.id] }),
-  plan: one(subscriptionPlan, { fields: [subscription.planId], references: [subscriptionPlan.id] }),
+  plan: one(subscriptionPlan, {
+    fields: [subscription.planId],
+    references: [subscriptionPlan.id],
+  }),
 }));
 
 export const usageRelations = relations(usage, ({ one }) => ({
@@ -235,7 +287,10 @@ export const usageRelations = relations(usage, ({ one }) => ({
 
 export const paymentRelations = relations(payment, ({ one }) => ({
   user: one(user, { fields: [payment.userId], references: [user.id] }),
-  subscription: one(subscription, { fields: [payment.subscriptionId], references: [subscription.id] }),
+  subscription: one(subscription, {
+    fields: [payment.subscriptionId],
+    references: [subscription.id],
+  }),
 }));
 
 export const schema = {

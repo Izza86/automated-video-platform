@@ -1,17 +1,17 @@
 /**
  * This script creates the first admin user in the system.
  * Run this ONLY ONCE after your first user registration.
- * 
+ *
  * Usage:
  * 1. Register a normal user account
  * 2. Run: node scripts/create-first-admin.js <user-email>
- * 
+ *
  * Example: node scripts/create-first-admin.js admin@example.com
  */
 
+import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle.ts";
 import { user } from "../db/schema.ts";
-import { eq } from "drizzle-orm";
 
 const email = process.argv[2];
 
@@ -24,7 +24,7 @@ if (!email) {
 async function makeAdmin() {
   try {
     console.log(`🔍 Looking for user with email: ${email}`);
-    
+
     const existingUser = await db.query.user.findFirst({
       where: eq(user.email, email),
     });
@@ -35,17 +35,17 @@ async function makeAdmin() {
       process.exit(1);
     }
 
-    if (existingUser.role === 'admin') {
+    if (existingUser.role === "admin") {
       console.log(`ℹ️  User ${email} is already an admin`);
       process.exit(0);
     }
 
-    await db.update(user)
-      .set({ role: 'admin' })
-      .where(eq(user.email, email));
+    await db.update(user).set({ role: "admin" }).where(eq(user.email, email));
 
     console.log(`✅ Success! User ${email} is now an admin`);
-    console.log(`User can now access the admin panel at /dashboard/admin/users`);
+    console.log(
+      "User can now access the admin panel at /dashboard/admin/users"
+    );
   } catch (error) {
     console.error("❌ Error:", error);
     process.exit(1);

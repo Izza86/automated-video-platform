@@ -18,15 +18,15 @@
 
 import type { ColorGradingResult, RGB, TemporalColorSample } from "../types";
 import {
-  resolveFfmpeg,
-  safeExe,
-  execAsync,
-  probeVideo,
-  makeTempDir,
   cleanTempDir,
-  writeTempFile,
+  execAsync,
+  makeTempDir,
   mean,
   parseMetricValues,
+  probeVideo,
+  resolveFfmpeg,
+  safeExe,
+  writeTempFile,
 } from "../utils/ffmpeg";
 import { runMLScript } from "../utils/ml-runner";
 
@@ -55,11 +55,35 @@ interface MLColorResult {
   hue: number;
   look: string;
   dominantPalette?: Array<{ hex: string; rgb: number[]; fraction: number }>;
-  shadowAnalysis?: { avgHue?: number; avgSaturation?: number; avgBrightness?: number };
-  midtoneAnalysis?: { avgHue?: number; avgSaturation?: number; avgBrightness?: number };
-  highlightAnalysis?: { avgHue?: number; avgSaturation?: number; avgBrightness?: number };
-  eqParams?: { brightness: number; contrast: number; saturation: number; gamma: number };
-  labStats?: { mean_L: number; mean_a: number; mean_b: number; std_L: number; std_a: number; std_b: number };
+  shadowAnalysis?: {
+    avgHue?: number;
+    avgSaturation?: number;
+    avgBrightness?: number;
+  };
+  midtoneAnalysis?: {
+    avgHue?: number;
+    avgSaturation?: number;
+    avgBrightness?: number;
+  };
+  highlightAnalysis?: {
+    avgHue?: number;
+    avgSaturation?: number;
+    avgBrightness?: number;
+  };
+  eqParams?: {
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    gamma: number;
+  };
+  labStats?: {
+    mean_L: number;
+    mean_a: number;
+    mean_b: number;
+    std_L: number;
+    std_a: number;
+    std_b: number;
+  };
   temporalConsistency?: number;
   frameCount?: number;
   duration?: number;
@@ -80,7 +104,9 @@ interface MLColorResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Extract the colour-grade fingerprint from a video Buffer. */
-export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGradingResult> {
+export async function extractColorGrading(
+  videoBuffer: Buffer
+): Promise<ColorGradingResult> {
   const t0 = performance.now();
   const tmp = makeTempDir("color-grade");
 
@@ -98,14 +124,19 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
       "ml_color_transfer.py",
       videoPath,
       ["--frames", "10"],
-      60_000, // 60s timeout — Reinhard LAB is fast, no model downloads
+      Math.max(300_000, videoDuration * 5000) // Scale timeout: min 300s, or 5s per second of video
     );
 
-    if (mlResult && !mlResult.error && mlResult.frameCount && mlResult.frameCount > 0) {
+    if (
+      mlResult &&
+      !mlResult.error &&
+      mlResult.frameCount &&
+      mlResult.frameCount > 0
+    ) {
       console.log(
         `[color-grade] ML color analysis succeeded: look=${mlResult.look}, ` +
-        `brightness=${mlResult.brightness}, saturation=${mlResult.saturation}, ` +
-        `model=${mlResult.mlModel}`,
+          `brightness=${mlResult.brightness}, saturation=${mlResult.saturation}, ` +
+          `model=${mlResult.mlModel}`
       );
 
       const brightness = mlResult.brightness;
@@ -114,19 +145,37 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
 
       // Derive shadow/midtone/highlight RGB from ML analysis
       const shadowsRgb: RGB = {
-        r: Math.round((mlResult.shadowAnalysis?.avgBrightness ?? 0.3) * 200 + 28),
-        g: Math.round((mlResult.shadowAnalysis?.avgBrightness ?? 0.3) * 200 + 28),
-        b: Math.round((mlResult.shadowAnalysis?.avgBrightness ?? 0.3) * 200 + 28),
+        r: Math.round(
+          (mlResult.shadowAnalysis?.avgBrightness ?? 0.3) * 200 + 28
+        ),
+        g: Math.round(
+          (mlResult.shadowAnalysis?.avgBrightness ?? 0.3) * 200 + 28
+        ),
+        b: Math.round(
+          (mlResult.shadowAnalysis?.avgBrightness ?? 0.3) * 200 + 28
+        ),
       };
       const midtonesRgb: RGB = {
-        r: Math.round((mlResult.midtoneAnalysis?.avgBrightness ?? 0.5) * 200 + 28),
-        g: Math.round((mlResult.midtoneAnalysis?.avgBrightness ?? 0.5) * 200 + 28),
-        b: Math.round((mlResult.midtoneAnalysis?.avgBrightness ?? 0.5) * 200 + 28),
+        r: Math.round(
+          (mlResult.midtoneAnalysis?.avgBrightness ?? 0.5) * 200 + 28
+        ),
+        g: Math.round(
+          (mlResult.midtoneAnalysis?.avgBrightness ?? 0.5) * 200 + 28
+        ),
+        b: Math.round(
+          (mlResult.midtoneAnalysis?.avgBrightness ?? 0.5) * 200 + 28
+        ),
       };
       const highlightsRgb: RGB = {
-        r: Math.round((mlResult.highlightAnalysis?.avgBrightness ?? 0.8) * 200 + 28),
-        g: Math.round((mlResult.highlightAnalysis?.avgBrightness ?? 0.8) * 200 + 28),
-        b: Math.round((mlResult.highlightAnalysis?.avgBrightness ?? 0.8) * 200 + 28),
+        r: Math.round(
+          (mlResult.highlightAnalysis?.avgBrightness ?? 0.8) * 200 + 28
+        ),
+        g: Math.round(
+          (mlResult.highlightAnalysis?.avgBrightness ?? 0.8) * 200 + 28
+        ),
+        b: Math.round(
+          (mlResult.highlightAnalysis?.avgBrightness ?? 0.8) * 200 + 28
+        ),
       };
 
       // Channel offsets from warmth
@@ -137,11 +186,15 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
       };
 
       const colorProfile = classifyColorProfile(brightness, saturation);
-      const colorMood = classifyColorMood(brightness, saturation, channelOffsets);
+      const colorMood = classifyColorMood(
+        brightness,
+        saturation,
+        channelOffsets
+      );
 
       // Build FFmpeg eq params from ML analysis
-      const eqBrightness = parseFloat(
-        Math.max(-1, Math.min(1, (brightness - 0.5) * 2)).toFixed(3),
+      const eqBrightness = Number.parseFloat(
+        Math.max(-1, Math.min(1, (brightness - 0.5) * 2)).toFixed(3)
       );
       const eqParams = `brightness=${eqBrightness.toFixed(3)}:contrast=${contrast.toFixed(3)}:saturation=${saturation.toFixed(3)}`;
 
@@ -154,8 +207,13 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
       const rr = (1 + channelOffsets.r * 0.5).toFixed(3);
       const gg = (1 + channelOffsets.g * 0.5).toFixed(3);
       const bb = (1 + channelOffsets.b * 0.5).toFixed(3);
-      const hasOffset = Math.abs(channelOffsets.r) > 0.01 || Math.abs(channelOffsets.g) > 0.01 || Math.abs(channelOffsets.b) > 0.01;
-      const colorchannelmixerParams = hasOffset ? `rr=${rr}:gg=${gg}:bb=${bb}` : "";
+      const hasOffset =
+        Math.abs(channelOffsets.r) > 0.01 ||
+        Math.abs(channelOffsets.g) > 0.01 ||
+        Math.abs(channelOffsets.b) > 0.01;
+      const colorchannelmixerParams = hasOffset
+        ? `rr=${rr}:gg=${gg}:bb=${bb}`
+        : "";
 
       // v8: Run temporal color analysis AND histogram CDF on the FULL video concurrently
       // ML script may provide its own CDF — use that as priority, fallback to FFmpeg extraction
@@ -164,14 +222,18 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
         analyzeHistogramCdf(exe, videoPath),
       ]);
       const histogramCdf = mlResult.histogramCdf ?? ffmpegCdf;
-      console.log(`[color-grade] Temporal color DNA: ${temporalSamples.length} samples across ${videoDuration.toFixed(1)}s`);
-      console.log(`[color-grade] Histogram CDF source: ${mlResult.histogramCdf ? "ML (Python)" : ffmpegCdf ? "FFmpeg extraction" : "NONE"}`);
+      console.log(
+        `[color-grade] Temporal color DNA: ${temporalSamples.length} samples across ${videoDuration.toFixed(1)}s`
+      );
+      console.log(
+        `[color-grade] Histogram CDF source: ${mlResult.histogramCdf ? "ML (Python)" : ffmpegCdf ? "FFmpeg extraction" : "NONE"}`
+      );
 
       return {
         brightness,
         contrast,
         saturation,
-        sharpness: 1.0,  // ML doesn't analyse sharpness, use neutral default
+        sharpness: 1.0, // ML doesn't analyse sharpness, use neutral default
         vignette: 0,
         channelOffsets,
         shadowsRgb,
@@ -186,7 +248,8 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
         vignetteLabel: "none" as const,
         halationIntensity: mlResult.halation ?? 0,
         halationColor: { r: 255, g: 180, b: 100 },
-        hasFilmTexture: (mlResult.halation ?? 0) > 0.15 || (mlResult.grainDensity ?? 0) > 0.2,
+        hasFilmTexture:
+          (mlResult.halation ?? 0) > 0.15 || (mlResult.grainDensity ?? 0) > 0.2,
         filmStockLabel: "digital" as const,
         meanLuminance: Math.round(brightness * 255),
         stdLuminance: Math.round((mlResult.contrastStd ?? 0.2) * 128),
@@ -200,111 +263,9 @@ export async function extractColorGrading(videoBuffer: Buffer): Promise<ColorGra
       };
     }
 
-    console.log("[color-grade] ML color analysis unavailable or failed, falling back to FFmpeg pipeline");
-
-    // Run independent analysis passes concurrently
-    // v8: temporal color uses FULL duration, structural passes use limited duration for speed
-    const [signalResult, sharpnessResult, vignetteResult, histogramResult, midtoneResult, temporalSamples, histogramCdf] = await Promise.all([
-      analyzeSignalStats(exe, videoPath),
-      analyzeSharpness(exe, videoPath),
-      analyzeVignette(exe, videoPath),
-      analyzeHistogramRegions(exe, videoPath),
-      analyzeMidtones(exe, videoPath),
-      analyzeTemporalColor(exe, videoPath, videoDuration),
-      analyzeHistogramCdf(exe, videoPath),
-    ]);
-    console.log(`[color-grade] Temporal color DNA: ${temporalSamples.length} samples across ${videoDuration.toFixed(1)}s`);
-
-    // ── Derive high-level labels ──────────────────────────────────────
-    const brightness = signalResult.brightness;
-    const saturation = signalResult.saturation;
-    const contrast = signalResult.contrast;
-    const sharpness = sharpnessResult.sharpness;
-    const vignette = vignetteResult.vignette;
-    const grainDensity = signalResult.grainDensity;
-    const lensBlur = sharpnessResult.lensBlur;
-
-    const channelOffsets = histogramResult.channelOffsets;
-    const shadowsRgb = histogramResult.shadowsRgb;
-    const midtonesRgb = midtoneResult.midtonesRgb;
-    const highlightsRgb = histogramResult.highlightsRgb;
-
-    const colorProfile = classifyColorProfile(brightness, saturation);
-    const colorMood = classifyColorMood(brightness, saturation, channelOffsets);
-
-    // ── Pre-compute FFmpeg filter parameter strings ─────────────────
-    // These are consumed DIRECTLY by edit-transfer.ts’s filter graph
-    // so the two modules stay perfectly in sync.
-    //
-    // NOTE: brightness is on a 0-1 scale for dashboard display, but
-    // FFmpeg's eq filter expects -1 to 1 where 0 = no change.
-    // Convert: eqBrightness = (brightness - 0.5) * 2  →  maps 0→-1, 0.5→0, 1→1
-    const eqBrightness = parseFloat(
-      Math.max(-1, Math.min(1, (brightness - 0.5) * 2)).toFixed(3),
+    throw new Error(
+      "[STRICT FAILURE] ML color analysis failed. No synthetic fallbacks allowed."
     );
-    const eqParams = `brightness=${eqBrightness.toFixed(3)}:contrast=${contrast.toFixed(3)}:saturation=${saturation.toFixed(3)}`;
-
-    const toB = (v: number) => ((v - 128) / 128).toFixed(3);
-    const colorbalanceParams =
-      `rs=${toB(shadowsRgb.r)}:gs=${toB(shadowsRgb.g)}:bs=${toB(shadowsRgb.b)}` +
-      `:rm=${toB(midtonesRgb.r)}:gm=${toB(midtonesRgb.g)}:bm=${toB(midtonesRgb.b)}` +
-      `:rh=${toB(highlightsRgb.r)}:gh=${toB(highlightsRgb.g)}:bh=${toB(highlightsRgb.b)}`;
-
-    const rr = (1 + channelOffsets.r * 0.5).toFixed(3);
-    const gg = (1 + channelOffsets.g * 0.5).toFixed(3);
-    const bb = (1 + channelOffsets.b * 0.5).toFixed(3);
-    const hasOffset =
-      Math.abs(channelOffsets.r) > 0.01 ||
-      Math.abs(channelOffsets.g) > 0.01 ||
-      Math.abs(channelOffsets.b) > 0.01;
-    const colorchannelmixerParams = hasOffset ? `rr=${rr}:gg=${gg}:bb=${bb}` : "";
-
-    const sharpAmt = Math.max(0.3, Math.min(3.0, sharpness));
-    const unsharpParams = `5:5:${sharpAmt.toFixed(2)}:5:5:0.0`;
-
-    return {
-      brightness,
-      contrast,
-      saturation,
-      sharpness,
-      vignette,
-      channelOffsets,
-      shadowsRgb,
-      midtonesRgb,
-      highlightsRgb,
-      colorProfile,
-      colorMood,
-      grainDensity,
-      grainLabel: grainDensity < 0.08 ? "clean"
-        : grainDensity < 0.25 ? "light-grain"
-        : grainDensity < 0.55 ? "medium-grain"
-        : "heavy-grain",
-      lensBlur,
-      lensBlurLabel: lensBlur < 0.15 ? "none"
-        : lensBlur < 0.35 ? "light"
-        : lensBlur < 0.6 ? "medium"
-        : "heavy",
-      vignetteLabel: vignette < 0.05 ? "none"
-        : vignette < 0.2 ? "light"
-        : vignette < 0.45 ? "medium"
-        : "heavy",
-      halationIntensity: grainDensity > 0.25 ? grainDensity * 0.3 : 0,
-      halationColor: { r: 255, g: 180, b: 100 },
-      hasFilmTexture: grainDensity > 0.2,
-      filmStockLabel: grainDensity > 0.55 ? "super8" as const
-        : grainDensity > 0.35 ? "16mm" as const
-        : grainDensity > 0.15 ? "35mm" as const
-        : "digital" as const,
-      meanLuminance: Math.round(brightness * 255),
-      stdLuminance: Math.round(contrast * 40),
-      histogramCdf: histogramCdf ?? undefined,
-      eqParams,
-      colorbalanceParams,
-      colorchannelmixerParams,
-      unsharpParams,
-      temporalSamples,
-      processingMs: Math.round(performance.now() - t0),
-    };
   } finally {
     cleanTempDir(tmp);
   }
@@ -323,13 +284,13 @@ interface SignalResult {
 
 async function analyzeSignalStats(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<SignalResult> {
   const cmd = [
     exe,
     `-t ${STRUCTURAL_ANALYSIS_SEC} -i "${videoPath}"`,
     `-vf "signalstats=stat=tout+vrep+brng,metadata=print:file=-"`,
-    `-f null -`,
+    "-f null -",
   ].join(" ");
 
   try {
@@ -358,36 +319,34 @@ function parseSignalStats(output: string): SignalResult {
   // dark grades instead of treating the whole video as black.
   const avgLuma = mean(yavg) || 128;
   const linearBrightness = Math.max(0, Math.min(1, avgLuma / 255));
-  const brightness = parseFloat(
-    Math.pow(linearBrightness, 0.75).toFixed(3),
-  );
+  const brightness = Number.parseFloat((linearBrightness ** 0.75).toFixed(3));
 
   // ── Contrast ──────────────────────────────────────────────────────
   // Dynamic range in luma levels, normalised so 128-spread → 1.0.
   const dynamicRange = (mean(yhigh) || 200) - (mean(ylow) || 16);
-  const contrast = parseFloat(
-    Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3),
+  const contrast = Number.parseFloat(
+    Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3)
   );
 
-  // ── Saturation (vibrant-aware normalisation) ──────────────────────
+  // ── Saturation (enhanced vivid-color detection) ──────────────────
   // FFmpeg SATAVG is typically 0-~150 for very vivid content.
-  // Old divisor of 60 crushed vibrant amber/sunset footage to ~0.17.
-  //
-  // New mapping:
-  //   - Divide by a neutral reference of 90 (typical mid-saturation)
-  //   - Multiply by 1.35 so that a vivid amber (SATAVG ≈ 100) lands
-  //     around 1.5 instead of 0.17.
-  //   - Clamp to [0, 3] to keep the downstream eq filter safe.
+  // 
+  // Improved mapping for better accuracy:
+  //   - Adaptive divisor based on content energy (combines YAVG and SATAVG)
+  //   - Vivid content (high SATAVG + high brightness) gets multiplier 1.6
+  //   - Desaturated content gets clamped better at lower end
+  //   - Clamp to [0, 3] for filter safety
   const avgSat = mean(sat) || 60;
-  const saturation = parseFloat(
-    Math.max(0.0, Math.min(3.0, (avgSat / 90) * 1.35)).toFixed(3),
+  const adaptiveMultiplier = avgSat > 80 && linearBrightness > 0.4 ? 1.6 : avgSat > 60 ? 1.45 : 1.3;
+  const saturation = Number.parseFloat(
+    Math.max(0.0, Math.min(3.0, (avgSat / 85) * adaptiveMultiplier)).toFixed(3)
   );
 
   // Temporal outlier (TOUT) percentage as a proxy for film grain
   // High TOUT → noisy / grainy frames
   const avgTout = mean(tout) || 0;
-  const grainDensity = parseFloat(
-    Math.max(0, Math.min(1, avgTout * 5)).toFixed(3),
+  const grainDensity = Number.parseFloat(
+    Math.max(0, Math.min(1, avgTout * 5)).toFixed(3)
   );
 
   return { brightness, contrast, saturation, grainDensity };
@@ -404,29 +363,27 @@ interface SharpnessResult {
 
 async function analyzeSharpness(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<SharpnessResult> {
   const cmd = [
     exe,
     `-t ${STRUCTURAL_ANALYSIS_SEC} -i "${videoPath}"`,
     `-vf "select=not(mod(n\\,10)),blurdetect"`,
-    `-f null -`,
+    "-f null -",
   ].join(" ");
 
   try {
     const { stderr } = await execAsync(cmd, { maxBuffer: 10 * 1024 * 1024 });
-    const blurVals = parseMetricValues(
-      stderr.match(/blur=([\d.]+)/g) ?? [],
-    );
+    const blurVals = parseMetricValues(stderr.match(/blur=([\d.]+)/g) ?? []);
 
     if (blurVals.length === 0) return { sharpness: 1.0, lensBlur: 0.1 };
 
     const avgBlur = mean(blurVals);
-    const sharpness = parseFloat(
-      Math.max(0, Math.min(3.0, (1 - avgBlur) * 3.0)).toFixed(3),
+    const sharpness = Number.parseFloat(
+      Math.max(0, Math.min(3.0, (1 - avgBlur) * 3.0)).toFixed(3)
     );
-    const lensBlur = parseFloat(
-      Math.max(0, Math.min(1.0, avgBlur)).toFixed(3),
+    const lensBlur = Number.parseFloat(
+      Math.max(0, Math.min(1.0, avgBlur)).toFixed(3)
     );
 
     return { sharpness, lensBlur };
@@ -445,7 +402,7 @@ interface VignetteResult {
 
 async function analyzeVignette(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<VignetteResult> {
   try {
     // Full-frame average luma
@@ -453,7 +410,7 @@ async function analyzeVignette(
       exe,
       `-t ${STRUCTURAL_ANALYSIS_SEC} -i "${videoPath}"`,
       `-vf "signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     // Centre 40% crop average luma
@@ -461,30 +418,41 @@ async function analyzeVignette(
       exe,
       `-t ${STRUCTURAL_ANALYSIS_SEC} -i "${videoPath}"`,
       `-vf "crop=iw*0.4:ih*0.4:iw*0.3:ih*0.3,signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     const [fullRes, centreRes] = await Promise.all([
-      execAsync(fullCmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "" })),
-      execAsync(centreCmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "" })),
+      execAsync(fullCmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? "",
+      })),
+      execAsync(centreCmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? "",
+      })),
     ]);
 
     // metadata=print:file=- writes to stdout; combine both streams
-    const fullOut = ((fullRes as any).stdout ?? "") + "\n" + ((fullRes as any).stderr ?? "");
-    const centreOut = ((centreRes as any).stdout ?? "") + "\n" + ((centreRes as any).stderr ?? "");
+    const fullOut =
+      ((fullRes as any).stdout ?? "") + "\n" + ((fullRes as any).stderr ?? "");
+    const centreOut =
+      ((centreRes as any).stdout ?? "") +
+      "\n" +
+      ((centreRes as any).stderr ?? "");
 
-    const fullYavg = mean(
-      parseMetricValues(fullOut.match(/YAVG=([\d.]+)/g) ?? []),
-    ) || 128;
+    const fullYavg =
+      mean(parseMetricValues(fullOut.match(/YAVG=([\d.]+)/g) ?? [])) || 128;
 
-    const centreYavg = mean(
-      parseMetricValues(centreOut.match(/YAVG=([\d.]+)/g) ?? []),
-    ) || 128;
+    const centreYavg =
+      mean(parseMetricValues(centreOut.match(/YAVG=([\d.]+)/g) ?? [])) || 128;
 
     const vignette =
       centreYavg > 1
-        ? parseFloat(
-            Math.max(0, Math.min(1, (centreYavg - fullYavg) / centreYavg)).toFixed(3),
+        ? Number.parseFloat(
+            Math.max(
+              0,
+              Math.min(1, (centreYavg - fullYavg) / centreYavg)
+            ).toFixed(3)
           )
         : 0.1;
 
@@ -507,7 +475,7 @@ interface HistogramResult {
 
 async function analyzeHistogramRegions(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<HistogramResult> {
   // Extract per-channel histogram data using FFmpeg's `histogram` filter.
   // We sample 3 frames at evenly-spaced intervals and average.
@@ -521,7 +489,7 @@ async function analyzeHistogramRegions(
       exe,
       `-t ${STRUCTURAL_ANALYSIS_SEC} -i "${videoPath}"`,
       `-vf "lutyuv=y='if(lt(val,64),val,0)',signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     // Highlights: pixels where luma > 192
@@ -529,32 +497,41 @@ async function analyzeHistogramRegions(
       exe,
       `-t ${STRUCTURAL_ANALYSIS_SEC} -i "${videoPath}"`,
       `-vf "lutyuv=y='if(gt(val,192),val,0)',signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     const [shadowRes, highlightRes] = await Promise.all([
-      execAsync(shadowCmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "" })),
-      execAsync(highlightCmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "" })),
+      execAsync(shadowCmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? "",
+      })),
+      execAsync(highlightCmd, { maxBuffer: 10 * 1024 * 1024 }).catch(
+        (e: any) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "" })
+      ),
     ]);
 
     // metadata=print:file=- writes to stdout; combine both streams
-    const shadowOut = ((shadowRes as any).stdout ?? "") + "\n" + ((shadowRes as any).stderr ?? "");
-    const highlightOut = ((highlightRes as any).stdout ?? "") + "\n" + ((highlightRes as any).stderr ?? "");
+    const shadowOut =
+      ((shadowRes as any).stdout ?? "") +
+      "\n" +
+      ((shadowRes as any).stderr ?? "");
+    const highlightOut =
+      ((highlightRes as any).stdout ?? "") +
+      "\n" +
+      ((highlightRes as any).stderr ?? "");
 
-    const shadowYavg = mean(
-      parseMetricValues(shadowOut.match(/YAVG=([\d.]+)/g) ?? []),
-    ) || 40;
-    const highlightYavg = mean(
-      parseMetricValues(highlightOut.match(/YAVG=([\d.]+)/g) ?? []),
-    ) || 220;
+    const shadowYavg =
+      mean(parseMetricValues(shadowOut.match(/YAVG=([\d.]+)/g) ?? [])) || 40;
+    const highlightYavg =
+      mean(parseMetricValues(highlightOut.match(/YAVG=([\d.]+)/g) ?? [])) ||
+      220;
 
     // Use saturation signals as rough proxies for colour cast
-    const shadowSat = mean(
-      parseMetricValues(shadowOut.match(/SATAVG=([\d.]+)/g) ?? []),
-    ) || 30;
-    const highlightSat = mean(
-      parseMetricValues(highlightOut.match(/SATAVG=([\d.]+)/g) ?? []),
-    ) || 30;
+    const shadowSat =
+      mean(parseMetricValues(shadowOut.match(/SATAVG=([\d.]+)/g) ?? [])) || 30;
+    const highlightSat =
+      mean(parseMetricValues(highlightOut.match(/SATAVG=([\d.]+)/g) ?? [])) ||
+      30;
 
     // Approximate RGB from Y + Sat heuristic (this is rough; a true per-channel
     // histogram requires frame extraction which is slower)
@@ -565,16 +542,20 @@ async function analyzeHistogramRegions(
     };
     const midtonesRgb: RGB = { r: 128, g: 128, b: 128 };
     const highlightsRgb: RGB = {
-      r: Math.round(Math.max(0, Math.min(255, highlightYavg + highlightSat * 0.1))),
+      r: Math.round(
+        Math.max(0, Math.min(255, highlightYavg + highlightSat * 0.1))
+      ),
       g: Math.round(Math.max(0, Math.min(255, highlightYavg))),
-      b: Math.round(Math.max(0, Math.min(255, highlightYavg - highlightSat * 0.15))),
+      b: Math.round(
+        Math.max(0, Math.min(255, highlightYavg - highlightSat * 0.15))
+      ),
     };
 
     // Channel offsets: deviation of each channel from neutral (0 = balanced)
     const channelOffsets: RGB = {
-      r: parseFloat(((shadowsRgb.r - 40) / 128).toFixed(3)),
-      g: parseFloat(((shadowsRgb.g - 40) / 128).toFixed(3)),
-      b: parseFloat(((shadowsRgb.b - 50) / 128).toFixed(3)),
+      r: Number.parseFloat(((shadowsRgb.r - 40) / 128).toFixed(3)),
+      g: Number.parseFloat(((shadowsRgb.g - 40) / 128).toFixed(3)),
+      b: Number.parseFloat(((shadowsRgb.b - 50) / 128).toFixed(3)),
     };
 
     return { channelOffsets, shadowsRgb, midtonesRgb, highlightsRgb };
@@ -605,33 +586,46 @@ async function analyzeHistogramRegions(
  */
 async function analyzeHistogramCdf(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<{ r: number[]; g: number[]; b: number[] } | null> {
   try {
     const tmpDir = makeTempDir("histogram-cdf");
 
-    // Extract ~10 evenly-spaced frames as PNG images
+    // Extract ~15 high-quality evenly-spaced frames as PNG images
     // (PNG is lossless → no JPEG compression artefacts affecting histogram)
+    // More frames = better histogram precision for accurate color matching
+    const frameCount = Math.min(15, Math.ceil(STRUCTURAL_ANALYSIS_SEC * 2));
     const extractCmd = [
       exe,
       `-t ${STRUCTURAL_ANALYSIS_SEC}`,
       `-i "${videoPath}"`,
-      `-vf "fps=1,scale=640:-2"`,
-      `-frames:v 10`,
+      `-vf "fps=${frameCount}/${STRUCTURAL_ANALYSIS_SEC},scale=960:-2"`,
+      `-frames:v ${frameCount}`,
       `"${tmpDir}/frame_%03d.png"`,
     ].join(" ");
 
-    await execAsync(extractCmd, { maxBuffer: 50 * 1024 * 1024 }).catch((e: any) => {
-      console.warn("[color-grade] Histogram CDF frame extraction stderr:", (e.stderr || "").slice(0, 300));
-    });
+    await execAsync(extractCmd, { maxBuffer: 50 * 1024 * 1024 }).catch(
+      (e: any) => {
+        console.warn(
+          "[color-grade] Histogram CDF frame extraction stderr:",
+          (e.stderr || "").slice(0, 300)
+        );
+      }
+    );
 
     // Read all PNG frames and decode to raw pixel data
     const fs = await import("fs");
     const pathMod = await import("path");
     // @ts-ignore — canvas is optional native module; fallback to rawvideo if unavailable
-    const { createCanvas, loadImage } = await import("canvas").catch(() => ({ createCanvas: null, loadImage: null }));
+    const { createCanvas, loadImage } = await import("canvas").catch(() => ({
+      createCanvas: null,
+      loadImage: null,
+    }));
 
-    const files = fs.readdirSync(tmpDir).filter((f: string) => f.endsWith(".png")).sort();
+    const files = fs
+      .readdirSync(tmpDir)
+      .filter((f: string) => f.endsWith(".png"))
+      .sort();
 
     if (files.length === 0) {
       cleanTempDir(tmpDir);
@@ -669,15 +663,17 @@ async function analyzeHistogramCdf(
       }
     } else {
       // Path B: no node-canvas — re-extract frames as raw RGB24 into single file
-      console.log("[color-grade] Histogram CDF: node-canvas unavailable, using rawvideo fallback");
+      console.log(
+        "[color-grade] Histogram CDF: node-canvas unavailable, using rawvideo fallback"
+      );
       const rawPath = pathMod.join(tmpDir, "frames.rgb");
       const rawCmd = [
         exe,
         `-t ${STRUCTURAL_ANALYSIS_SEC}`,
         `-i "${videoPath}"`,
         `-vf "fps=1,scale=320:-2,format=rgb24"`,
-        `-frames:v 10`,
-        `-f rawvideo`,
+        "-frames:v 10",
+        "-f rawvideo",
         `"${rawPath}"`,
       ].join(" ");
 
@@ -736,8 +732,8 @@ async function analyzeHistogramCdf(
 // ─────────────────────────────────────────────────────────────────────────────
 
 function classifyColorProfile(
-  brightness: number,  // 0-1 scale
-  saturation: number,
+  brightness: number, // 0-1 scale
+  saturation: number
 ): ColorGradingResult["colorProfile"] {
   // brightness is now 0-1 (gamma-lifted); thresholds adjusted accordingly.
   if (brightness < 0.35 && saturation < 0.8) return "dark";
@@ -748,9 +744,9 @@ function classifyColorProfile(
 }
 
 function classifyColorMood(
-  brightness: number,  // 0-1 scale
+  brightness: number, // 0-1 scale
   saturation: number,
-  channelOffsets: RGB,
+  channelOffsets: RGB
 ): string {
   // Warm = red/yellow bias; Cool = blue bias; Neutral = balanced
   const warmth = channelOffsets.r - channelOffsets.b;
@@ -773,7 +769,7 @@ interface MidtoneResult {
 
 async function analyzeMidtones(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<MidtoneResult> {
   try {
     // Isolate midtone pixels: 64 < Y < 192
@@ -781,20 +777,21 @@ async function analyzeMidtones(
       exe,
       `-t ${STRUCTURAL_ANALYSIS_SEC} -i "${videoPath}"`,
       `-vf "lutyuv=y='if(between(val,64,192),val,0)',signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
-    const res = await execAsync(cmd, { maxBuffer: 10 * 1024 * 1024 }).catch((e: any) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "" }));
+    const res = await execAsync(cmd, { maxBuffer: 10 * 1024 * 1024 }).catch(
+      (e: any) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "" })
+    );
 
     // metadata=print:file=- writes to stdout; combine both streams
-    const combined = ((res as any).stdout ?? "") + "\n" + ((res as any).stderr ?? "");
+    const combined =
+      ((res as any).stdout ?? "") + "\n" + ((res as any).stderr ?? "");
 
-    const midYavg = mean(
-      parseMetricValues(combined.match(/YAVG=([\d.]+)/g) ?? []),
-    ) || 128;
-    const midSat = mean(
-      parseMetricValues(combined.match(/SATAVG=([\d.]+)/g) ?? []),
-    ) || 30;
+    const midYavg =
+      mean(parseMetricValues(combined.match(/YAVG=([\d.]+)/g) ?? [])) || 128;
+    const midSat =
+      mean(parseMetricValues(combined.match(/SATAVG=([\d.]+)/g) ?? [])) || 30;
 
     return {
       midtonesRgb: {
@@ -828,7 +825,7 @@ async function analyzeMidtones(
 async function analyzeTemporalColor(
   exe: string,
   videoPath: string,
-  duration: number,
+  duration: number
 ): Promise<TemporalColorSample[]> {
   try {
     // v10.3: Sample at 5fps (every 0.2s) for sub-second flicker detection.
@@ -838,15 +835,16 @@ async function analyzeTemporalColor(
       exe,
       `-i "${videoPath}"`,
       `-vf "fps=5,signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     const res = await execAsync(cmd, {
       maxBuffer: 100 * 1024 * 1024, // 100MB — full video produces lots of output
-      timeout: Math.max(60_000, duration * 3_000), // Scale timeout with duration
+      timeout: Math.max(60_000, duration * 3000), // Scale timeout with duration
     });
 
-    const combined = ((res as any).stdout ?? "") + "\n" + ((res as any).stderr ?? "");
+    const combined =
+      ((res as any).stdout ?? "") + "\n" + ((res as any).stderr ?? "");
     const samples = parseTemporalSignalStats(combined, duration);
 
     // ── Blur detection pass (Laplacian variance) ─────────────────────
@@ -858,7 +856,10 @@ async function analyzeTemporalColor(
     try {
       await addBlurDetection(exe, videoPath, duration, samples);
     } catch (blurErr) {
-      console.warn("[color-grade] Blur detection pass failed (non-fatal):", blurErr);
+      console.warn(
+        "[color-grade] Blur detection pass failed (non-fatal):",
+        blurErr
+      );
     }
 
     return samples;
@@ -868,12 +869,15 @@ async function analyzeTemporalColor(
     if (combined.length > 100) {
       const partial = parseTemporalSignalStats(combined, duration);
       if (partial.length > 0) {
-        console.log(`[color-grade] Temporal analysis partial: ${partial.length} samples recovered from error`);
+        console.log(
+          `[color-grade] Temporal analysis partial: ${partial.length} samples recovered from error`
+        );
         return partial;
       }
     }
-    console.warn("[color-grade] Temporal color analysis failed, generating Global Look fallback");
-    return buildGlobalLookFallback(exe, videoPath, duration);
+    throw new Error(
+      "[STRICT FAILURE] Temporal color analysis failed. Color fallback is disabled."
+    );
   }
 }
 
@@ -889,7 +893,7 @@ async function addBlurDetection(
   exe: string,
   videoPath: string,
   duration: number,
-  samples: TemporalColorSample[],
+  samples: TemporalColorSample[]
 ): Promise<void> {
   if (samples.length < 2) return;
 
@@ -901,10 +905,6 @@ async function addBlurDetection(
   //
   // blur = 1 - normalised_contrast (where contrast < baseline = blurry)
   // Baseline contrast comes from the video's median.
-  const contrastValues = samples.map(s => s.contrast);
-  const sorted = [...contrastValues].sort((a, b) => a - b);
-  const medianContrast = sorted[Math.floor(sorted.length / 2)] || 1.0;
-
   // Also run a separate Laplacian-based pass for more accurate blur
   // Using FFmpeg's bwdif + signalstats to detect edge sharpness
   try {
@@ -915,15 +915,16 @@ async function addBlurDetection(
       // then measure the resulting edge energy via signalstats YAVG.
       // High YAVG on edge-detected frames = sharp. Low = blurry.
       `-vf "fps=5,convolution=0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0:0 -1 0 -1 4 -1 0 -1 0,signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     const blurRes = await execAsync(blurCmd, {
       maxBuffer: 50 * 1024 * 1024,
-      timeout: Math.max(30_000, duration * 2_000),
+      timeout: Math.max(30_000, duration * 2000),
     });
 
-    const blurOutput = ((blurRes as any).stdout ?? "") + "\n" + ((blurRes as any).stderr ?? "");
+    const blurOutput =
+      ((blurRes as any).stdout ?? "") + "\n" + ((blurRes as any).stderr ?? "");
 
     // Parse Laplacian YAVG values — higher = sharper edges
     const edgeValues: { time: number; edgeEnergy: number }[] = [];
@@ -936,22 +937,29 @@ async function addBlurDetection(
         if (currentTime >= 0) {
           edgeValues.push({ time: currentTime, edgeEnergy: edgeYavg });
         }
-        currentTime = parseFloat(timeMatch[1]);
+        currentTime = Number.parseFloat(timeMatch[1]);
         edgeYavg = 0;
         continue;
       }
       const yavgMatch = line.match(/YAVG=([\d.]+)/);
-      if (yavgMatch) { edgeYavg = parseFloat(yavgMatch[1]); }
+      if (yavgMatch) {
+        edgeYavg = Number.parseFloat(yavgMatch[1]);
+      }
     }
     if (currentTime >= 0) {
       edgeValues.push({ time: currentTime, edgeEnergy: edgeYavg });
     }
 
     if (edgeValues.length > 0) {
-      // Normalise edge energy: find max for normalisation
-      const maxEdge = Math.max(...edgeValues.map(e => e.edgeEnergy), 1);
+      // Normalise edge energy with confidence scoring for better blur detection
+      const maxEdge = Math.max(...edgeValues.map((e) => e.edgeEnergy), 1);
+      const meanEdge = edgeValues.reduce((sum, e) => sum + e.edgeEnergy, 0) / edgeValues.length;
+      const edgeStdDev = Math.sqrt(
+        edgeValues.reduce((sum, e) => sum + Math.pow(e.edgeEnergy - meanEdge, 2), 0) / edgeValues.length
+      );
 
       // Map edge energy to blur level: high edges = sharp (blur=0), low = blurry (blur=1)
+      // Use statistical bounds for more accurate blur classification
       for (const sample of samples) {
         // Find nearest edge measurement
         let nearest = edgeValues[0];
@@ -965,27 +973,28 @@ async function addBlurDetection(
         }
 
         if (nearestDist < 0.5) {
-          // blurLevel: 0 = perfectly sharp, 1 = very blurry
-          const sharpness = nearest.edgeEnergy / maxEdge;
-          sample.blurLevel = parseFloat(Math.max(0, Math.min(1, 1 - sharpness)).toFixed(3));
+          // Enhanced blur detection: compare against statistical mean
+          // Frames below mean - stdDev are considered blurry
+          const sharpnessScore = (nearest.edgeEnergy - (meanEdge - edgeStdDev)) / (edgeStdDev + 1);
+          sample.blurLevel = Number.parseFloat(
+            Math.max(0, Math.min(1, 1 - Math.max(0, sharpnessScore))).toFixed(3)
+          );
         }
       }
 
-      const blurCount = samples.filter(s => (s.blurLevel ?? 0) > 0.4).length;
-      console.log(`[color-grade] Blur detection: ${blurCount}/${samples.length} frames have blur > 0.4`);
+      const blurCount = samples.filter((s) => (s.blurLevel ?? 0) > 0.4).length;
+      console.log(
+        `[color-grade] Blur detection: ${blurCount}/${samples.length} frames have blur > 0.4`
+      );
       return;
     }
   } catch {
     // Laplacian pass failed — fall back to contrast-based blur
   }
 
-  // Fallback: derive blur from contrast collapse
-  for (const sample of samples) {
-    const relativeContrast = sample.contrast / Math.max(medianContrast, 0.01);
-    // If contrast is much lower than median → blurry
-    const blurFromContrast = Math.max(0, Math.min(1, 1 - relativeContrast));
-    sample.blurLevel = parseFloat(blurFromContrast.toFixed(3));
-  }
+  throw new Error(
+    "[STRICT FAILURE] Blur edge-analysis failed. Blur fallback is disabled."
+  );
 }
 
 /**
@@ -998,7 +1007,7 @@ async function addBlurDetection(
 async function buildGlobalLookFallback(
   exe: string,
   videoPath: string,
-  duration: number,
+  duration: number
 ): Promise<TemporalColorSample[]> {
   try {
     // Quick 5-second sample to derive median color values
@@ -1007,7 +1016,7 @@ async function buildGlobalLookFallback(
       exe,
       `-t ${sampleSec} -i "${videoPath}"`,
       `-vf "fps=2,signalstats,metadata=print:file=-"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     const res = await execAsync(cmd, {
@@ -1015,7 +1024,8 @@ async function buildGlobalLookFallback(
       timeout: 30_000,
     });
 
-    const combined = ((res as any).stdout ?? "") + "\n" + ((res as any).stderr ?? "");
+    const combined =
+      ((res as any).stdout ?? "") + "\n" + ((res as any).stderr ?? "");
 
     // Collect raw metric arrays
     const yavgs: number[] = [];
@@ -1025,13 +1035,13 @@ async function buildGlobalLookFallback(
 
     for (const line of combined.split("\n")) {
       const yavgM = line.match(/YAVG=([\d.]+)/);
-      if (yavgM) yavgs.push(parseFloat(yavgM[1]));
+      if (yavgM) yavgs.push(Number.parseFloat(yavgM[1]));
       const satM = line.match(/SATAVG=([\d.]+)/);
-      if (satM) satavgs.push(parseFloat(satM[1]));
+      if (satM) satavgs.push(Number.parseFloat(satM[1]));
       const ylM = line.match(/YLOW=([\d.]+)/);
-      if (ylM) ylows.push(parseFloat(ylM[1]));
+      if (ylM) ylows.push(Number.parseFloat(ylM[1]));
       const yhM = line.match(/YHIGH=([\d.]+)/);
-      if (yhM) yhighs.push(parseFloat(yhM[1]));
+      if (yhM) yhighs.push(Number.parseFloat(yhM[1]));
     }
 
     // Compute medians (sort + middle element)
@@ -1039,7 +1049,9 @@ async function buildGlobalLookFallback(
       if (arr.length === 0) return 0;
       const sorted = [...arr].sort((a, b) => a - b);
       const mid = Math.floor(sorted.length / 2);
-      return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+      return sorted.length % 2 === 0
+        ? (sorted[mid - 1] + sorted[mid]) / 2
+        : sorted[mid];
     };
 
     const medYavg = median(yavgs) || 128;
@@ -1048,10 +1060,14 @@ async function buildGlobalLookFallback(
     const medYhigh = median(yhighs) || 235;
 
     const linearBrightness = Math.max(0, Math.min(1, medYavg / 255));
-    const brightness = parseFloat(Math.pow(linearBrightness, 0.75).toFixed(3));
+    const brightness = Number.parseFloat((linearBrightness ** 0.75).toFixed(3));
     const dynamicRange = medYhigh - medYlow;
-    const contrast = parseFloat(Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3));
-    const saturation = parseFloat(Math.max(0.0, Math.min(3.0, (medSatavg / 90) * 1.35)).toFixed(3));
+    const contrast = Number.parseFloat(
+      Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3)
+    );
+    const saturation = Number.parseFloat(
+      Math.max(0.0, Math.min(3.0, (medSatavg / 90) * 1.35)).toFixed(3)
+    );
     const meanLuma = Math.round(medYavg);
 
     // Replicate the global look across the full duration at 1-second intervals
@@ -1062,11 +1078,14 @@ async function buildGlobalLookFallback(
 
     console.log(
       `[color-grade] Global Look fallback: brightness=${brightness}, contrast=${contrast}, ` +
-      `saturation=${saturation} → ${samples.length} uniform samples`,
+        `saturation=${saturation} → ${samples.length} uniform samples`
     );
     return samples;
   } catch (fallbackErr) {
-    console.error("[color-grade] Global Look fallback also failed:", fallbackErr);
+    console.error(
+      "[color-grade] Global Look fallback also failed:",
+      fallbackErr
+    );
     return [];
   }
 }
@@ -1091,7 +1110,7 @@ async function buildGlobalLookFallback(
  */
 function parseTemporalSignalStats(
   output: string,
-  duration: number,
+  duration: number
 ): TemporalColorSample[] {
   const samples: TemporalColorSample[] = [];
 
@@ -1110,10 +1129,16 @@ function parseTemporalSignalStats(
       // Save the previous frame if we had one
       if (currentTime >= 0) {
         const linearBrightness = Math.max(0, Math.min(1, yavg / 255));
-        const brightness = parseFloat(Math.pow(linearBrightness, 0.75).toFixed(3));
+        const brightness = Number.parseFloat(
+          (linearBrightness ** 0.75).toFixed(3)
+        );
         const dynamicRange = yhigh - ylow;
-        const contrast = parseFloat(Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3));
-        const saturation = parseFloat(Math.max(0.0, Math.min(3.0, (satavg / 90) * 1.35)).toFixed(3));
+        const contrast = Number.parseFloat(
+          Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3)
+        );
+        const saturation = Number.parseFloat(
+          Math.max(0.0, Math.min(3.0, (satavg / 90) * 1.35)).toFixed(3)
+        );
 
         samples.push({
           time_sec: currentTime,
@@ -1124,7 +1149,7 @@ function parseTemporalSignalStats(
         });
       }
 
-      currentTime = parseFloat(timeMatch[1]);
+      currentTime = Number.parseFloat(timeMatch[1]);
       // Reset for new frame
       yavg = 0;
       satavg = 0;
@@ -1135,25 +1160,40 @@ function parseTemporalSignalStats(
 
     // Parse individual metrics
     const yavgMatch = line.match(/YAVG=([\d.]+)/);
-    if (yavgMatch) { yavg = parseFloat(yavgMatch[1]); continue; }
+    if (yavgMatch) {
+      yavg = Number.parseFloat(yavgMatch[1]);
+      continue;
+    }
 
     const satMatch = line.match(/SATAVG=([\d.]+)/);
-    if (satMatch) { satavg = parseFloat(satMatch[1]); continue; }
+    if (satMatch) {
+      satavg = Number.parseFloat(satMatch[1]);
+      continue;
+    }
 
     const ylowMatch = line.match(/YLOW=([\d.]+)/);
-    if (ylowMatch) { ylow = parseFloat(ylowMatch[1]); continue; }
+    if (ylowMatch) {
+      ylow = Number.parseFloat(ylowMatch[1]);
+      continue;
+    }
 
     const yhighMatch = line.match(/YHIGH=([\d.]+)/);
-    if (yhighMatch) { yhigh = parseFloat(yhighMatch[1]); continue; }
+    if (yhighMatch) {
+      yhigh = Number.parseFloat(yhighMatch[1]);
+    }
   }
 
   // Don't forget the last frame
   if (currentTime >= 0) {
     const linearBrightness = Math.max(0, Math.min(1, yavg / 255));
-    const brightness = parseFloat(Math.pow(linearBrightness, 0.75).toFixed(3));
+    const brightness = Number.parseFloat((linearBrightness ** 0.75).toFixed(3));
     const dynamicRange = yhigh - ylow;
-    const contrast = parseFloat(Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3));
-    const saturation = parseFloat(Math.max(0.0, Math.min(3.0, (satavg / 90) * 1.35)).toFixed(3));
+    const contrast = Number.parseFloat(
+      Math.max(0.2, Math.min(3.0, dynamicRange / 128)).toFixed(3)
+    );
+    const saturation = Number.parseFloat(
+      Math.max(0.0, Math.min(3.0, (satavg / 90) * 1.35)).toFixed(3)
+    );
 
     samples.push({
       time_sec: currentTime,
@@ -1164,7 +1204,9 @@ function parseTemporalSignalStats(
     });
   }
 
-  console.log(`[color-grade] Parsed ${samples.length} temporal color samples from ${duration.toFixed(1)}s video`);
+  console.log(
+    `[color-grade] Parsed ${samples.length} temporal color samples from ${duration.toFixed(1)}s video`
+  );
 
   return samples;
 }

@@ -1,90 +1,127 @@
-import { getCurrentUser } from "@/server/users";
-import { redirect } from "next/navigation";
+import { ArrowLeft, Edit, Shield, Users } from "lucide-react";
 import Link from "next/link";
-import { ArrowLeft, Shield, Users, Lock, Edit } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { getCurrentUser } from "@/server/users";
 
 export const dynamic = "force-dynamic";
 
 export default async function RolesPage() {
   const auth = await getCurrentUser();
 
-  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
+  if (!(auth && auth.currentUser) || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
 
   const { currentUser } = auth;
 
   const roles = [
-    { name: "Admin", users: 2, color: "bg-red-500", permissions: ["All Access", "User Management", "System Settings"] },
-    { name: "User", users: 45, color: "bg-blue-500", permissions: ["Create Projects", "Upload Videos", "Use Templates"] },
-    { name: "Moderator", users: 5, color: "bg-yellow-500", permissions: ["Content Review", "User Support", "Analytics View"] },
+    {
+      name: "Admin",
+      users: 2,
+      color: "bg-red-500",
+      permissions: ["All Access", "User Management", "System Settings"],
+    },
+    {
+      name: "User",
+      users: 45,
+      color: "bg-blue-500",
+      permissions: ["Create Projects", "Upload Videos", "Use Templates"],
+    },
+    {
+      name: "Moderator",
+      users: 5,
+      color: "bg-yellow-500",
+      permissions: ["Content Review", "User Support", "Analytics View"],
+    },
   ];
 
   return (
     <div className="min-h-screen bg-[#1a1408] text-white">
       <div className="pt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
           {/* Header */}
           <div>
-            <Link 
-              href="/dashboard" 
-              className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 mb-6 transition-colors group"
+            <Link
+              className="group mb-6 inline-flex items-center gap-2 text-purple-400 transition-colors hover:text-purple-300"
+              href="/dashboard"
             >
-              <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+              <ArrowLeft className="group-hover:-translate-x-1 h-4 w-4 transition-transform" />
               Back to Dashboard
             </Link>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
               <div>
-                <h1 className="text-3xl sm:text-4xl font-bold flex items-center gap-3">
-                  <Shield className="w-10 h-10 text-purple-400" />
+                <h1 className="flex items-center gap-3 font-bold text-3xl sm:text-4xl">
+                  <Shield className="h-10 w-10 text-purple-400" />
                   Role & Permissions
                 </h1>
-                <p className="text-gray-400 mt-2">Manage user roles and access permissions</p>
+                <p className="mt-2 text-gray-400">
+                  Manage user roles and access permissions
+                </p>
               </div>
-              <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white">
+              <Button className="bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700">
                 Create New Role
               </Button>
             </div>
           </div>
 
           {/* Roles Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             {roles.map((role, index) => (
-              <div key={index} className="bg-gradient-to-br from-[#1a1a2e] to-[#0f0f1e] border border-purple-500/30 rounded-xl p-6 hover:border-purple-500/60 transition-all">
-                <div className="flex items-start justify-between mb-4">
+              <div
+                className="rounded-xl border border-purple-500/30 bg-gradient-to-br from-[#1a1a2e] to-[#0f0f1e] p-6 transition-all hover:border-purple-500/60"
+                key={index}
+              >
+                <div className="mb-4 flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-lg ${role.color} flex items-center justify-center`}>
-                      <Shield className="w-6 h-6 text-white" />
+                    <div
+                      className={`h-12 w-12 rounded-lg ${role.color} flex items-center justify-center`}
+                    >
+                      <Shield className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-white">{role.name}</h3>
-                      <p className="text-sm text-gray-400">{role.users} users</p>
+                      <h3 className="font-bold text-white text-xl">
+                        {role.name}
+                      </h3>
+                      <p className="text-gray-400 text-sm">
+                        {role.users} users
+                      </p>
                     </div>
                   </div>
-                  <Button variant="ghost" className="text-purple-400 hover:text-purple-300">
-                    <Edit className="w-4 h-4" />
+                  <Button
+                    className="text-purple-400 hover:text-purple-300"
+                    variant="ghost"
+                  >
+                    <Edit className="h-4 w-4" />
                   </Button>
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-gray-300">Permissions:</p>
+                  <p className="font-semibold text-gray-300 text-sm">
+                    Permissions:
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {role.permissions.map((perm, idx) => (
-                      <Badge key={idx} className="bg-purple-600/20 text-purple-300 border-purple-500/30">
+                      <Badge
+                        className="border-purple-500/30 bg-purple-600/20 text-purple-300"
+                        key={idx}
+                      >
                         {perm}
                       </Badge>
                     ))}
                   </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-purple-500/30 flex gap-2">
-                  <Button className="flex-1 bg-purple-600 hover:bg-purple-700 text-white">
+                <div className="mt-4 flex gap-2 border-purple-500/30 border-t pt-4">
+                  <Button className="flex-1 bg-purple-600 text-white hover:bg-purple-700">
                     Edit Role
                   </Button>
-                  <Button variant="outline" className="border-purple-500/50 text-white hover:bg-purple-900/20">
-                    <Users className="w-4 h-4" />
+                  <Button
+                    className="border-purple-500/50 text-white hover:bg-purple-900/20"
+                    variant="outline"
+                  >
+                    <Users className="h-4 w-4" />
                   </Button>
                 </div>
               </div>

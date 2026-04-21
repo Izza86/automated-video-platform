@@ -1,19 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { Eye, EyeOff, Loader2, Lock } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Eye, EyeOff, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { changePasswordDirect, changePasswordWithToken } from "@/server/password";
+import {
+  changePasswordDirect,
+  changePasswordWithToken,
+} from "@/server/password";
 
 export function ChangePasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams?.get("token");
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -47,7 +50,7 @@ export function ChangePasswordForm() {
 
     try {
       let result;
-      
+
       if (token) {
         // Token-based password reset
         result = await changePasswordWithToken(token, newPassword);
@@ -71,26 +74,30 @@ export function ChangePasswordForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form className="space-y-6" onSubmit={handleSubmit}>
       {/* Current Password (only if no token) */}
       {!token && (
         <div className="space-y-2">
           <Label htmlFor="currentPassword">Current Password</Label>
           <div className="relative">
             <Input
+              className="border-purple-600/30 bg-white/5 pr-10 text-white"
               id="currentPassword"
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
               type={showCurrent ? "text" : "password"}
               value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="bg-white/5 border-purple-600/30 text-white pr-10"
-              required
             />
             <button
-              type="button"
+              className="-translate-y-1/2 absolute top-1/2 right-3 text-white/60 hover:text-white"
               onClick={() => setShowCurrent(!showCurrent)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white"
+              type="button"
             >
-              {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showCurrent ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
             </button>
           </div>
         </div>
@@ -101,22 +108,26 @@ export function ChangePasswordForm() {
         <Label htmlFor="newPassword">New Password</Label>
         <div className="relative">
           <Input
+            className="border-purple-600/30 bg-white/5 pr-10 text-white"
             id="newPassword"
+            onChange={(e) => setNewPassword(e.target.value)}
+            required
             type={showNew ? "text" : "password"}
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            className="bg-white/5 border-purple-600/30 text-white pr-10"
-            required
           />
           <button
-            type="button"
+            className="-translate-y-1/2 absolute top-1/2 right-3 text-white/60 hover:text-white"
             onClick={() => setShowNew(!showNew)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white"
+            type="button"
           >
-            {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {showNew ? (
+              <EyeOff className="h-4 w-4" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
           </button>
         </div>
-        <p className="text-xs text-white/60">
+        <p className="text-white/60 text-xs">
           At least 8 characters with uppercase, lowercase, and number
         </p>
       </div>
@@ -126,30 +137,34 @@ export function ChangePasswordForm() {
         <Label htmlFor="confirmPassword">Confirm New Password</Label>
         <div className="relative">
           <Input
+            className="border-purple-600/30 bg-white/5 pr-10 text-white"
             id="confirmPassword"
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
             type={showConfirm ? "text" : "password"}
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            className="bg-white/5 border-purple-600/30 text-white pr-10"
-            required
           />
           <button
-            type="button"
+            className="-translate-y-1/2 absolute top-1/2 right-3 text-white/60 hover:text-white"
             onClick={() => setShowConfirm(!showConfirm)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white"
+            type="button"
           >
-            {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {showConfirm ? (
+              <EyeOff className="h-4 w-4" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
           </button>
         </div>
       </div>
 
       {/* Password Strength Indicator */}
-      <div className="bg-purple-900/20 border border-purple-600/30 rounded-lg p-4">
-        <p className="text-sm font-medium mb-2 flex items-center gap-2">
-          <Lock className="w-4 h-4" />
+      <div className="rounded-lg border border-purple-600/30 bg-purple-900/20 p-4">
+        <p className="mb-2 flex items-center gap-2 font-medium text-sm">
+          <Lock className="h-4 w-4" />
           Password Requirements
         </p>
-        <ul className="text-xs text-white/70 space-y-1">
+        <ul className="space-y-1 text-white/70 text-xs">
           <li className={newPassword.length >= 8 ? "text-green-400" : ""}>
             • At least 8 characters
           </li>
@@ -162,37 +177,43 @@ export function ChangePasswordForm() {
           <li className={/\d/.test(newPassword) ? "text-green-400" : ""}>
             • One number
           </li>
-          <li className={newPassword === confirmPassword && newPassword.length > 0 ? "text-green-400" : ""}>
+          <li
+            className={
+              newPassword === confirmPassword && newPassword.length > 0
+                ? "text-green-400"
+                : ""
+            }
+          >
             • Passwords match
           </li>
         </ul>
       </div>
 
       {/* Submit Button */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row">
         <Button
-          type="submit"
+          className="w-full bg-purple-600 text-white hover:bg-purple-700 sm:w-auto"
           disabled={isLoading}
-          className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white"
+          type="submit"
         >
           {isLoading ? (
             <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Changing Password...
             </>
           ) : (
             "Change Password"
           )}
         </Button>
-        
+
         <Button
-          type="button"
+          className="w-full bg-purple-600 text-white hover:bg-purple-700 sm:w-auto"
           data-prefetch="/dashboard"
           onClick={async () => {
             await router.prefetch("/dashboard");
             router.push("/dashboard");
           }}
-          className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white"
+          type="button"
         >
           Cancel
         </Button>

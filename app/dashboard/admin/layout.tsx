@@ -14,7 +14,7 @@ export default async function AdminLayout({
 }) {
   const auth = await getCurrentUser();
 
-  if (!auth || !auth.currentUser || auth.currentUser.role !== "admin") {
+  if (!(auth && auth.currentUser) || auth.currentUser.role !== "admin") {
     redirect("/dashboard");
   }
 

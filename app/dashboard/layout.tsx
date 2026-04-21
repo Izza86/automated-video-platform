@@ -21,7 +21,7 @@ export default async function DashboardLayout({
   const isAdmin = currentUser?.role === "admin";
 
   return (
-    <DashboardShell isAdmin={isAdmin} currentUser={currentUser}>
+    <DashboardShell currentUser={currentUser} isAdmin={isAdmin}>
       {children}
     </DashboardShell>
   );

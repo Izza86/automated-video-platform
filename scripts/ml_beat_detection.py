@@ -419,8 +419,21 @@ def empty_result(duration=0):
 
 
 def main():
+    import time as _time
+    _t0 = _time.time()
+    stages_log = []
+
+    def _emit(result, warnings=None):
+        """Wrap every output in a standard envelope."""
+        result["_pipelineOk"] = "error" not in result or result.get("hasAudio", False)
+        result["_stages"] = stages_log
+        result["_processingMs"] = round((_time.time() - _t0) * 1000)
+        if warnings:
+            result["_warnings"] = warnings
+        print(json_dumps(result))
+
     if len(sys.argv) < 2:
-        print(json_dumps({"error": "Usage: ml_beat_detection.py <video_path>", **empty_result()}))
+        _emit({"error": "Usage: ml_beat_detection.py <video_path>", **empty_result()})
         return
 
     video_path = sys.argv[1]
@@ -429,30 +442,39 @@ def main():
         video_path = video_path[1:-1]
     
     if not os.path.isfile(video_path):
-        print(json_dumps({"error": f"File not found: {video_path}", **empty_result()}))
+        _emit({"error": f"File not found: {video_path}", **empty_result()})
         return
 
     # Extract audio to temp WAV
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
         wav_path = tmp.name
 
+    warnings = []
     try:
-        if not extract_audio(video_path, wav_path):
-            # No audio track or extraction failed
-            print(json_dumps(empty_result()))
+        st = _time.time()
+        audio_ok = extract_audio(video_path, wav_path)
+        stages_log.append({"name": "extract-audio", "ok": audio_ok, "ms": round((_time.time() - st) * 1000)})
+
+        if not audio_ok:
+            warnings.append("Audio extraction failed — no audio track or ffmpeg error")
+            _emit(empty_result(), warnings)
             return
 
         # Check if WAV has content
         if os.path.getsize(wav_path) < 1000:
-            print(json_dumps(empty_result()))
+            warnings.append("Audio file too small — likely silent or corrupt")
+            _emit(empty_result(), warnings)
             return
 
+        st = _time.time()
         result = analyze_beats(wav_path)
-        print(json_dumps(result))
+        stages_log.append({"name": "beat-analysis", "ok": True, "ms": round((_time.time() - st) * 1000)})
+        _emit(result, warnings if warnings else None)
     except Exception as e:
         import traceback
         traceback.print_exc(file=sys.stderr)
-        print(json_dumps({"error": str(e), **empty_result()}))
+        stages_log.append({"name": "beat-analysis", "ok": False, "error": str(e)})
+        _emit({"error": str(e), **empty_result()}, warnings if warnings else None)
     finally:
         try:
             os.unlink(wav_path)

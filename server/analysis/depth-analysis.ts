@@ -12,16 +12,16 @@
  */
 
 import type { DepthAnalysisResult, DepthFrameSample } from "../types/index";
-import { runMLScript } from "../utils/ml-runner";
 import {
+  cleanTempDir,
+  execAsync,
+  makeTempDir,
+  probeVideo,
   resolveFfmpeg,
   safeExe,
-  execAsync,
-  probeVideo,
-  makeTempDir,
-  cleanTempDir,
   writeTempFile,
 } from "../utils/ffmpeg";
+import { runMLScript } from "../utils/ml-runner";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ML Script Interface
@@ -53,7 +53,7 @@ interface MLDepthResult {
  * @returns `DepthAnalysisResult` with timeline and classification
  */
 export async function analyzeDepth(
-  videoBuffer: Buffer,
+  videoBuffer: Buffer
 ): Promise<DepthAnalysisResult> {
   const t0 = performance.now();
   const tmp = makeTempDir("depth-analysis");
@@ -66,7 +66,7 @@ export async function analyzeDepth(
       "ml_depth_analysis.py",
       videoPath,
       ["--fps", "2", "--model", "depth-anything-v2"],
-      300_000, // 5 min timeout
+      600_000 // 10 min timeout
     );
 
     if (
@@ -77,19 +77,21 @@ export async function analyzeDepth(
     ) {
       console.log(
         `[depth-analysis] ML depth succeeded: ${mlResult.depthTimeline.length} frames, ` +
-        `model=${mlResult.mlModel}, parallax=${mlResult.hasStrongParallax}`,
+          `model=${mlResult.mlModel}, parallax=${mlResult.hasStrongParallax}`
       );
 
-      const depthTimeline: DepthFrameSample[] = mlResult.depthTimeline.map((f) => ({
-        time_sec: f.time_sec,
-        meanDepth: f.meanDepth,
-        depthVariance: f.depthVariance,
-        fgBgSeparation: f.fgBgSeparation,
-      }));
+      const depthTimeline: DepthFrameSample[] = mlResult.depthTimeline.map(
+        (f) => ({
+          time_sec: f.time_sec,
+          meanDepth: f.meanDepth,
+          depthVariance: f.depthVariance,
+          fgBgSeparation: f.fgBgSeparation,
+        })
+      );
 
       const depthStyle = classifyDepthStyle(
         mlResult.avgFgBgSeparation ?? 0,
-        depthTimeline,
+        depthTimeline
       );
 
       return {
@@ -103,7 +105,7 @@ export async function analyzeDepth(
     }
 
     console.log(
-      "[depth-analysis] ML depth unavailable, falling back to FFmpeg blur-variance heuristic",
+      "[depth-analysis] ML depth unavailable, falling back to FFmpeg blur-variance heuristic"
     );
 
     // ── FFmpeg fallback: estimate depth from blur variance ─────────────
@@ -123,7 +125,7 @@ export async function analyzeDepth(
  */
 async function ffmpegDepthFallback(
   videoPath: string,
-  t0: number,
+  t0: number
 ): Promise<DepthAnalysisResult> {
   try {
     const ffmpeg = await resolveFfmpeg();
@@ -135,7 +137,7 @@ async function ffmpegDepthFallback(
       exe,
       `-t ${Math.min(probe.duration, 30)} -i "${videoPath}"`,
       `-vf "fps=2,blurdetect=low=0.1:high=0.3:radius=50"`,
-      `-f null -`,
+      "-f null -",
     ].join(" ");
 
     const res = await execAsync(cmd, { maxBuffer: 30 * 1024 * 1024 });
@@ -145,7 +147,7 @@ async function ffmpegDepthFallback(
     const blurMatches = combined.match(/blur=([\d.]+)/g) ?? [];
     const blurScores = blurMatches.map((m) => {
       const val = m.match(/blur=([\d.]+)/);
-      return val ? parseFloat(val[1]) : 0;
+      return val ? Number.parseFloat(val[1]) : 0;
     });
 
     if (blurScores.length === 0) {
@@ -153,10 +155,9 @@ async function ffmpegDepthFallback(
     }
 
     const avgBlur = blurScores.reduce((a, b) => a + b, 0) / blurScores.length;
-    const blurVariance = blurScores.reduce(
-      (acc, b) => acc + (b - avgBlur) ** 2,
-      0,
-    ) / blurScores.length;
+    const blurVariance =
+      blurScores.reduce((acc, b) => acc + (b - avgBlur) ** 2, 0) /
+      blurScores.length;
 
     // High blur variance → shallow DOF → strong fg/bg separation
     const fgBgSeparation = Math.min(1, blurVariance * 10);
@@ -183,8 +184,8 @@ async function ffmpegDepthFallback(
     // with full Extreme Mode settings even without depth data.
     console.error(
       "[depth-analysis] Both ML depth and FFmpeg fallback FAILED. " +
-      "Returning flat default — render will proceed without depth.",
-      err instanceof Error ? err.message : err,
+        "Returning flat default — render will proceed without depth.",
+      err instanceof Error ? err.message : err
     );
     return defaultDepthResult(t0);
   }
@@ -196,16 +197,15 @@ async function ffmpegDepthFallback(
 
 function classifyDepthStyle(
   avgSeparation: number,
-  timeline: DepthFrameSample[],
+  timeline: DepthFrameSample[]
 ): DepthAnalysisResult["depthStyle"] {
   // Check for focus racking (high variance in fgBgSeparation over time)
   if (timeline.length > 4) {
     const sepValues = timeline.map((f) => f.fgBgSeparation);
     const sepMean = sepValues.reduce((a, b) => a + b, 0) / sepValues.length;
-    const sepVariance = sepValues.reduce(
-      (acc, v) => acc + (v - sepMean) ** 2,
-      0,
-    ) / sepValues.length;
+    const sepVariance =
+      sepValues.reduce((acc, v) => acc + (v - sepMean) ** 2, 0) /
+      sepValues.length;
     if (sepVariance > 0.04) return "racking";
   }
 

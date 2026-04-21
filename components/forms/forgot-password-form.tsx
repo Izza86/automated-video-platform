@@ -9,13 +9,6 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Form,
   FormControl,
   FormField,
@@ -56,7 +49,9 @@ export function ForgotPasswordForm({
       if (error) {
         toast.error(error.message || "Failed to send reset email");
       } else {
-        toast.success("✅ Password reset email sent successfully! Check your inbox.");
+        toast.success(
+          "✅ Password reset email sent successfully! Check your inbox."
+        );
         form.reset();
       }
     } catch (err) {
@@ -80,9 +75,9 @@ export function ForgotPasswordForm({
                   <FormLabel className="text-white">Email Address</FormLabel>
                   <FormControl>
                     <Input
+                      className="h-12 border-purple-500/50 bg-black/30 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/30"
                       placeholder="you@example.com"
                       type="email"
-                      className="h-12 bg-black/30 border-purple-500/50 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/30"
                       {...field}
                     />
                   </FormControl>
@@ -93,7 +88,7 @@ export function ForgotPasswordForm({
 
             {/* Submit Button */}
             <Button
-              className="w-full h-12 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-[1.02]"
+              className="h-12 w-full transform bg-gradient-to-r from-purple-600 to-pink-600 font-bold text-white shadow-xl transition-all duration-300 hover:scale-[1.02] hover:from-purple-500 hover:to-pink-500 hover:shadow-2xl"
               disabled={isLoading}
               type="submit"
             >
@@ -108,10 +103,10 @@ export function ForgotPasswordForm({
             </Button>
 
             {/* Back to Login */}
-            <div className="text-center text-sm text-purple-200">
+            <div className="text-center text-purple-200 text-sm">
               Remember your password?{" "}
               <Link
-                className="font-semibold text-white hover:text-purple-300 underline underline-offset-4 transition-colors"
+                className="font-semibold text-white underline underline-offset-4 transition-colors hover:text-purple-300"
                 href="/login"
               >
                 Back to login
@@ -122,7 +117,7 @@ export function ForgotPasswordForm({
       </Form>
 
       {/* Info */}
-      <div className="text-center text-xs text-purple-300/70">
+      <div className="text-center text-purple-300/70 text-xs">
         We'll send you a secure link to reset your password
       </div>
     </div>

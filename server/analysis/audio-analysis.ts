@@ -22,21 +22,21 @@
 
 import type {
   AudioBeatResult,
+  AudioTimelinePoint,
   BeatEvent,
   RhythmRegion,
-  AudioTimelinePoint,
 } from "../types";
 import {
+  cleanTempDir,
+  execAsync,
+  makeTempDir,
+  mean,
+  probeVideo,
   resolveFfmpeg,
   safeExe,
-  execAsync,
-  probeVideo,
-  makeTempDir,
-  cleanTempDir,
   writeTempFile,
-  mean,
 } from "../utils/ffmpeg";
-import { runMLScript, runColabMLScriptWithRetry } from "../utils/ml-runner";
+import { runColabMLScriptWithRetry, runMLScript } from "../utils/ml-runner";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -109,7 +109,7 @@ interface MLBeatResult {
 
 /** Analyse audio beats, spectral flux and volume from a video Buffer. */
 export async function analyzeAudio(
-  videoBuffer: Buffer,
+  videoBuffer: Buffer
 ): Promise<AudioBeatResult> {
   const t0 = performance.now();
   const tmp = makeTempDir("audio");
@@ -136,20 +136,26 @@ export async function analyzeAudio(
       (await runColabMLScriptWithRetry<MLBeatResult>(
         "ml_beat_detection.py",
         videoPath,
-        600_000,  // 10 min per attempt
-        3,        // 3 retry attempts
+        600_000, // 10 min per attempt
+        3 // 3 retry attempts
       )) ??
       (await runMLScript<MLBeatResult>(
         "ml_beat_detection.py",
         videoPath,
         [],
-        600_000, // 10 min timeout for local Python
+        600_000 // 10 min timeout for local Python
       ));
 
-    if (mlResult && !mlResult.error && mlResult.hasAudio && mlResult.beatEvents && mlResult.beatEvents.length > 0) {
+    if (
+      mlResult &&
+      !mlResult.error &&
+      mlResult.hasAudio &&
+      mlResult.beatEvents &&
+      mlResult.beatEvents.length > 0
+    ) {
       console.log(
         `[audio] ML beat detection succeeded: ${mlResult.beatEvents.length} beats, ` +
-        `BPM=${mlResult.bpm}, confidence=${mlResult.bpmConfidence}, model=${mlResult.mlModel}`,
+          `BPM=${mlResult.bpm}, confidence=${mlResult.bpmConfidence}, model=${mlResult.mlModel}`
       );
 
       // Map ML beat events to our BeatEvent type
@@ -161,7 +167,9 @@ export async function analyzeAudio(
       }));
 
       // Map ML rhythm regions
-      const mlRhythmRegions: RhythmRegion[] = (mlResult.rhythmRegions ?? []).map((r) => ({
+      const mlRhythmRegions: RhythmRegion[] = (
+        mlResult.rhythmRegions ?? []
+      ).map((r) => ({
         start_sec: r.start_sec,
         end_sec: r.end_sec,
         localBpm: r.localBpm ?? mlResult.bpm,
@@ -170,7 +178,9 @@ export async function analyzeAudio(
       }));
 
       // Map ML timeline
-      const mlTimeline: AudioTimelinePoint[] = (mlResult.audioTimeline ?? []).map((t) => ({
+      const mlTimeline: AudioTimelinePoint[] = (
+        mlResult.audioTimeline ?? []
+      ).map((t) => ({
         time_sec: t.time_sec,
         energy: t.energy,
         flux: t.flux ?? 0,
@@ -192,10 +202,15 @@ export async function analyzeAudio(
         audioTimeline: mlTimeline.slice(0, MAX_TIMELINE_PTS),
         rhythmRegions: mlRhythmRegions,
         regionCount: mlRhythmRegions.length,
-        avgBeatIntensity: intensities.length > 0 ? round3(mean(intensities)) : 0,
-        peakBeatIntensity: intensities.length > 0 ? round3(Math.max(...intensities)) : 0,
-        beatDensity: probe.duration > 0 ? round3(cappedEvents.length / probe.duration) : 0,
-        timeSignatureGuess: (mlResult.timeSignatureGuess as AudioBeatResult["timeSignatureGuess"]) ?? "unknown",
+        avgBeatIntensity:
+          intensities.length > 0 ? round3(mean(intensities)) : 0,
+        peakBeatIntensity:
+          intensities.length > 0 ? round3(Math.max(...intensities)) : 0,
+        beatDensity:
+          probe.duration > 0 ? round3(cappedEvents.length / probe.duration) : 0,
+        timeSignatureGuess:
+          (mlResult.timeSignatureGuess as AudioBeatResult["timeSignatureGuess"]) ??
+          "unknown",
         processingMs: Math.round(performance.now() - t0),
       };
     }
@@ -206,13 +221,15 @@ export async function analyzeAudio(
     //    result so the caller retries with Colab GPU active.
     console.error(
       "[audio] ❌ ML beat detection FAILED after all retries " +
-      "(Colab 3× + local Python). FFmpeg/librosa fallback is DISABLED. " +
-      "Ensure the Colab GPU notebook is running and COLAB_GPU_URL is set.",
+        "(Colab 3× + local Python). FFmpeg/librosa fallback is DISABLED. " +
+        "Ensure the Colab GPU notebook is running and COLAB_GPU_URL is set."
     );
     return emptyResult(t0);
 
     // ---------- Legacy FFmpeg pipeline below (unreachable — strict mode) ----------
-    console.log("[audio] ML beat detection unavailable or failed, falling back to FFmpeg pipeline");
+    console.log(
+      "[audio] ML beat detection unavailable or failed, falling back to FFmpeg pipeline"
+    );
 
     const ffmpeg = await resolveFfmpeg();
     const exe = safeExe(ffmpeg);
@@ -244,7 +261,7 @@ export async function analyzeAudio(
       // Primary completely failed — unconditionally use energy fallback
       const energyFallback = fallbackEnergyOnsets(rawTimeline);
       console.log(
-        `[audio] Flux onsets=0, energy fallback=${energyFallback.length} — FORCED energy fallback`,
+        `[audio] Flux onsets=0, energy fallback=${energyFallback.length} — FORCED energy fallback`
       );
       beatEvents = energyFallback;
     } else if (beatEvents.length < 5 && rawTimeline.length >= 4) {
@@ -252,7 +269,7 @@ export async function analyzeAudio(
       const energyFallback = fallbackEnergyOnsets(rawTimeline);
       if (energyFallback.length > beatEvents.length) {
         console.log(
-          `[audio] Flux onsets=${beatEvents.length}, energy fallback=${energyFallback.length} — using energy`,
+          `[audio] Flux onsets=${beatEvents.length}, energy fallback=${energyFallback.length} — using energy`
         );
         beatEvents = energyFallback;
       }
@@ -267,15 +284,11 @@ export async function analyzeAudio(
 
     // ── Aggregate metrics ─────────────────────────────────────────────
     const intensities = beatEvents.map((b) => b.intensity);
-    const avgBeatIntensity = intensities.length > 0
-      ? round3(mean(intensities))
-      : 0;
-    const peakBeatIntensity = intensities.length > 0
-      ? round3(Math.max(...intensities))
-      : 0;
-    const beatDensity = duration > 0
-      ? round3(beatEvents.length / duration)
-      : 0;
+    const avgBeatIntensity =
+      intensities.length > 0 ? round3(mean(intensities)) : 0;
+    const peakBeatIntensity =
+      intensities.length > 0 ? round3(Math.max(...intensities)) : 0;
+    const beatDensity = duration > 0 ? round3(beatEvents.length / duration) : 0;
 
     const timeSignatureGuess = guessTimeSignature(beatTimes, bpm);
 
@@ -321,14 +334,14 @@ interface EnergyFrame {
 
 async function extractEnergyTimeline(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<EnergyFrame[]> {
   const cmd = [
     exe,
-    `-analyzeduration 100M -probesize 100M`,
+    "-analyzeduration 100M -probesize 100M",
     `-i "${videoPath}"`,
     `-af "astats=metadata=1:reset=1,ametadata=print:file=-"`,
-    `-vn -f null -`,
+    "-vn -f null -",
   ].join(" ");
 
   try {
@@ -357,17 +370,17 @@ function parseAstatsOutput(output: string): EnergyFrame[] {
   // (e.g. `RMS_level: -12.5`).  The regex `[:=]\s*` handles both.
   for (const line of lines) {
     const ptsM = line.match(/pts_time[:=]\s*([\d.]+)/);
-    if (ptsM) pts = parseFloat(ptsM[1]);
+    if (ptsM) pts = Number.parseFloat(ptsM[1]);
 
     const rmsM = line.match(/RMS_level[:=]\s*([-\d.]+)/);
-    if (rmsM) rmsDb = parseFloat(rmsM[1]);
+    if (rmsM) rmsDb = Number.parseFloat(rmsM[1]);
 
     const crestM = line.match(/Crest_factor[:=]\s*([\d.]+)/);
-    if (crestM) crest = parseFloat(crestM[1]);
+    if (crestM) crest = Number.parseFloat(crestM[1]);
 
     // Each frame emits RMS_level last in astats output — use as commit
     if (rmsM && Number.isFinite(rmsDb)) {
-      const linear = rmsDb <= -100 ? 0 : Math.pow(10, rmsDb / 20);
+      const linear = rmsDb <= -100 ? 0 : 10 ** (rmsDb / 20);
       frames.push({ time: pts, rms: Math.min(1, linear), crest });
     }
   }
@@ -400,23 +413,23 @@ interface BandFrame {
 
 async function extractBandEnergy(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<BandFrame[]> {
   // Use a crossover filter approach:
   // Split into 4 bands, measure RMS of each via metadata.
   // This is done in a single FFmpeg command with filter_complex.
   const cmd = [
     exe,
-    ` -analyzeduration 100M -probesize 100M`,
+    " -analyzeduration 100M -probesize 100M",
     ` -i "${videoPath}"`,
     ` -filter_complex "`,
-    `[0:a]asplit=4[a1][a2][a3][a4];`,
+    "[0:a]asplit=4[a1][a2][a3][a4];",
     `[a1]lowpass=f=${BAND_SUB_BASS_HI},astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-[out1];`,
     `[a2]highpass=f=${BAND_SUB_BASS_HI},lowpass=f=${BAND_BASS_HI},astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-[out2];`,
     `[a3]highpass=f=${BAND_BASS_HI},lowpass=f=${BAND_MID_HI},astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-[out3];`,
     `[a4]highpass=f=${BAND_MID_HI},astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-[out4]"`,
     `-map "[out1]" -map "[out2]" -map "[out3]" -map "[out4]"`,
-    `-f null -`,
+    "-f null -",
   ].join("");
 
   try {
@@ -446,30 +459,46 @@ function parseBandOutput(output: string): BandFrame[] {
   for (const line of lines) {
     // Track which stream we're in (output changes between streams)
     const streamM = line.match(/Stream #0:(\d+)/);
-    if (streamM) streamIdx = parseInt(streamM[1], 10);
+    if (streamM) streamIdx = Number.parseInt(streamM[1], 10);
 
     const ptsM = line.match(/pts_time[:=]\s*([\d.]+)/);
-    if (ptsM) currentPts = round2Bucket(parseFloat(ptsM[1]));
+    if (ptsM) currentPts = round2Bucket(Number.parseFloat(ptsM[1]));
 
     const rmsM = line.match(/RMS_level[:=]\s*([-\d.]+)/);
     if (rmsM) {
-      const rmsDb = parseFloat(rmsM[1]);
-      const linear = rmsDb <= -100 ? 0 : Math.pow(10, rmsDb / 20);
+      const rmsDb = Number.parseFloat(rmsM[1]);
+      const linear = rmsDb <= -100 ? 0 : 10 ** (rmsDb / 20);
 
       if (!buckets.has(currentPts)) {
-        buckets.set(currentPts, { time: currentPts, subBass: 0, bass: 0, mid: 0, high: 0 });
+        buckets.set(currentPts, {
+          time: currentPts,
+          subBass: 0,
+          bass: 0,
+          mid: 0,
+          high: 0,
+        });
       }
       const b = buckets.get(currentPts)!;
 
       // Assign to the appropriate band based on parse order
       // Since all 4 streams share the same stderr, we use a round-robin
       // approach based on how many RMS values we've seen for this timestamp
-      const filled = [b.subBass, b.bass, b.mid, b.high].filter((v) => v !== undefined && v > 0).length;
+      const filled = [b.subBass, b.bass, b.mid, b.high].filter(
+        (v) => v !== undefined && v > 0
+      ).length;
       switch (filled) {
-        case 0: b.subBass = linear; break;
-        case 1: b.bass = linear; break;
-        case 2: b.mid = linear; break;
-        case 3: b.high = linear; break;
+        case 0:
+          b.subBass = linear;
+          break;
+        case 1:
+          b.bass = linear;
+          break;
+        case 2:
+          b.mid = linear;
+          break;
+        case 3:
+          b.high = linear;
+          break;
       }
     }
   }
@@ -553,27 +582,37 @@ interface TimelineFrame {
 function fuseTimeline(
   energyFrames: EnergyFrame[],
   fluxFrames: FluxFrame[],
-  _duration: number,
+  _duration: number
 ): TimelineFrame[] {
   const buckets = new Map<number, TimelineFrame>();
 
   for (const ef of energyFrames) {
     const key = round2Bucket(ef.time);
-    if (!buckets.has(key)) {
-      buckets.set(key, { time: key, energy: ef.rms, flux: 0, dominantBand: "mid" });
-    } else {
+    if (buckets.has(key)) {
       buckets.get(key)!.energy = ef.rms;
+    } else {
+      buckets.set(key, {
+        time: key,
+        energy: ef.rms,
+        flux: 0,
+        dominantBand: "mid",
+      });
     }
   }
 
   for (const ff of fluxFrames) {
     const key = round2Bucket(ff.time);
-    if (!buckets.has(key)) {
-      buckets.set(key, { time: key, energy: 0, flux: ff.flux, dominantBand: ff.dominantBand });
-    } else {
+    if (buckets.has(key)) {
       const b = buckets.get(key)!;
       b.flux = ff.flux;
       b.dominantBand = ff.dominantBand;
+    } else {
+      buckets.set(key, {
+        time: key,
+        energy: 0,
+        flux: ff.flux,
+        dominantBand: ff.dominantBand,
+      });
     }
   }
 
@@ -603,15 +642,18 @@ function detectOnsets(timeline: TimelineFrame[]): BeatEvent[] {
   //    of peak), scale down the threshold multiplier so that even tiny
   //    spectral changes register as onsets.
   const sortedFlux = [...fluxArr].filter((v) => v > 0).sort((a, b) => a - b);
-  const medianFlux = sortedFlux.length > 0
-    ? sortedFlux[Math.floor(sortedFlux.length / 2)]
-    : 0;
+  const medianFlux =
+    sortedFlux.length > 0 ? sortedFlux[Math.floor(sortedFlux.length / 2)] : 0;
   const signalStrength = maxFlux > 0 ? medianFlux / maxFlux : 0;
 
   // Scale threshold: strong signal → full multiplier, weak → as low as 1.01
-  const adaptiveMult = signalStrength > 0.05
-    ? ONSET_THRESHOLD_MULT
-    : Math.max(1.01, 1.0 + (ONSET_THRESHOLD_MULT - 1.0) * (signalStrength / 0.05));
+  const adaptiveMult =
+    signalStrength > 0.05
+      ? ONSET_THRESHOLD_MULT
+      : Math.max(
+          1.01,
+          1.0 + (ONSET_THRESHOLD_MULT - 1.0) * (signalStrength / 0.05)
+        );
 
   // Floor gate: drop to 0.2% of peak for quiet audio — ultra-aggressive
   // so that even the faintest spectral changes are captured as onsets.
@@ -630,7 +672,8 @@ function detectOnsets(timeline: TimelineFrame[]): BeatEvent[] {
     // beats, making consecutive beats easier to detect.
     const windowFlux = fluxArr.slice(i - ADAPT_WINDOW, i);
     const windowSorted = [...windowFlux].sort((a, b) => a - b);
-    const p25 = windowSorted[Math.max(0, Math.floor(windowSorted.length * 0.25))];
+    const p25 =
+      windowSorted[Math.max(0, Math.floor(windowSorted.length * 0.25))];
     const localBaseline = (mean(windowFlux) + p25) / 2; // blend of mean and p25
     const threshold = localBaseline * adaptiveMult;
 
@@ -683,7 +726,7 @@ function detectOnsets(timeline: TimelineFrame[]): BeatEvent[] {
 
     if (normEvents.length > events.length) {
       console.log(
-        `[audio] Primary onsets=${events.length}, normalized-peak onsets=${normEvents.length} — using normalized`,
+        `[audio] Primary onsets=${events.length}, normalized-peak onsets=${normEvents.length} — using normalized`
       );
       return normEvents;
     }
@@ -703,13 +746,20 @@ function fallbackEnergyOnsets(timeline: TimelineFrame[]): BeatEvent[] {
   const maxEnergy = Math.max(...energyArr, 0.0001);
 
   // Adaptive sensitivity: quiet audio → lower threshold multiplier
-  const sortedEnergy = [...energyArr].filter((v) => v > 0).sort((a, b) => a - b);
-  const medianEnergy = sortedEnergy.length > 0
-    ? sortedEnergy[Math.floor(sortedEnergy.length / 2)]
-    : 0;
+  const sortedEnergy = [...energyArr]
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  const medianEnergy =
+    sortedEnergy.length > 0
+      ? sortedEnergy[Math.floor(sortedEnergy.length / 2)]
+      : 0;
   const energyStrength = maxEnergy > 0 ? medianEnergy / maxEnergy : 0;
-  const threshMult = energyStrength > 0.1 ? 1.08 : Math.max(1.01, 1.0 + 0.08 * (energyStrength / 0.1));
-  const floorGate = energyStrength > 0.1 ? maxEnergy * 0.005 : maxEnergy * 0.002;
+  const threshMult =
+    energyStrength > 0.1
+      ? 1.08
+      : Math.max(1.01, 1.0 + 0.08 * (energyStrength / 0.1));
+  const floorGate =
+    energyStrength > 0.1 ? maxEnergy * 0.005 : maxEnergy * 0.002;
 
   const events: BeatEvent[] = [];
   let lastOnsetTime = -1;
@@ -741,9 +791,7 @@ function fallbackEnergyOnsets(timeline: TimelineFrame[]): BeatEvent[] {
 // BPM Estimation — Autocorrelation with Confidence
 // ─────────────────────────────────────────────────────────────────────────────
 
-function estimateBPM(
-  beatTimes: number[],
-): { bpm: number; confidence: number } {
+function estimateBPM(beatTimes: number[]): { bpm: number; confidence: number } {
   if (beatTimes.length < 3) return { bpm: 0, confidence: 0 };
 
   // Compute inter-onset intervals (IOI)
@@ -778,7 +826,7 @@ function estimateBPM(
   // Confidence = ratio of inliers to total intervals × consistency factor
   const inlierRatio = filtered.length / ioi.length;
   const consistencyStd = Math.sqrt(
-    mean(filtered.map((v) => (v - avgIOI) ** 2)),
+    mean(filtered.map((v) => (v - avgIOI) ** 2))
   );
   const consistency = avgIOI > 0 ? Math.max(0, 1 - consistencyStd / avgIOI) : 0;
   const confidence = round3(Math.min(1, inlierRatio * consistency));
@@ -798,7 +846,7 @@ function estimateBPM(
 
 function guessTimeSignature(
   beatTimes: number[],
-  bpm: number,
+  bpm: number
 ): AudioBeatResult["timeSignatureGuess"] {
   if (bpm <= 0 || beatTimes.length < 8) return "unknown";
 
@@ -838,16 +886,18 @@ function guessTimeSignature(
 
 function segmentRhythmRegions(
   timeline: TimelineFrame[],
-  duration: number,
+  duration: number
 ): RhythmRegion[] {
   if (timeline.length < 2) {
-    return [{
-      start_sec: 0,
-      end_sec: duration,
-      localBpm: 0,
-      avgIntensity: 0,
-      energyLabel: "silent",
-    }];
+    return [
+      {
+        start_sec: 0,
+        end_sec: duration,
+        localBpm: 0,
+        avgIntensity: 0,
+        energyLabel: "silent",
+      },
+    ];
   }
 
   // Classify each frame into an energy bucket
@@ -905,7 +955,7 @@ function segmentRhythmRegions(
 
 function classifyEnergy(
   energy: number,
-  maxEnergy: number,
+  maxEnergy: number
 ): RhythmRegion["energyLabel"] {
   const ratio = maxEnergy > 0 ? energy / maxEnergy : 0;
   if (ratio < 0.05) return "silent";
@@ -926,7 +976,7 @@ interface VolumeInfo {
 
 async function detectVolume(
   exe: string,
-  videoPath: string,
+  videoPath: string
 ): Promise<VolumeInfo> {
   const cmd = `${exe} -analyzeduration 100M -probesize 100M -i "${videoPath}" -af volumedetect -vn -f null -`;
 
@@ -934,8 +984,8 @@ async function detectVolume(
     const { stderr } = await execAsync(cmd, { maxBuffer: 5 * 1024 * 1024 });
     const peakMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/);
     const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
-    const peakDb = peakMatch ? parseFloat(peakMatch[1]) : -20;
-    const meanDb = meanMatch ? parseFloat(meanMatch[1]) : -30;
+    const peakDb = peakMatch ? Number.parseFloat(peakMatch[1]) : -20;
+    const meanDb = meanMatch ? Number.parseFloat(meanMatch[1]) : -30;
     const meanVolume = Math.max(0, Math.min(1, (meanDb + 60) / 60));
     return { peakDb, meanVolume };
   } catch {
@@ -949,7 +999,7 @@ async function detectVolume(
 
 function downsampleTimeline(
   timeline: TimelineFrame[],
-  maxPoints: number,
+  maxPoints: number
 ): AudioTimelinePoint[] {
   if (timeline.length <= maxPoints) {
     return timeline.map((f) => ({
@@ -983,7 +1033,7 @@ function emptyResult(t0: number): AudioBeatResult {
     bpm: 0,
     bpmConfidence: 0,
     firstBeatSec: 0,
-    peakDb: -Infinity,
+    peakDb: Number.NEGATIVE_INFINITY,
     meanVolume: 0,
     hasAudio: false,
     audioTimeline: [],
@@ -1002,9 +1052,9 @@ function emptyResult(t0: number): AudioBeatResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function round1(n: number): number {
-  return parseFloat(n.toFixed(1));
+  return Number.parseFloat(n.toFixed(1));
 }
 
 function round3(n: number): number {
-  return parseFloat(n.toFixed(3));
+  return Number.parseFloat(n.toFixed(3));
 }

@@ -23,12 +23,12 @@
  */
 
 import type {
-  RGB,
   BeatEvent,
-  TemporalColorSample,
-  ShotBoundary,
-  MotionAnalysisResult,
   DepthAnalysisResult,
+  MotionAnalysisResult,
+  RGB,
+  ShotBoundary,
+  TemporalColorSample,
 } from "./index";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,10 +65,8 @@ export interface PacingDNA {
     histScore: number;
     ecrScore: number;
   }>;
-  /** Whether fallback pacing detection was triggered (hard cuts ≤1) */
-  fallbackPacingTriggered: boolean;
-  /** Synthetic cut points generated from motion+color analysis (v12 feature) */
-  syntheticCutCount: number;
+  /** Raw timestamps of detected hard cuts (for deterministic replication) */
+  rawCutTimestamps: number[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,6 +109,13 @@ export interface MotionDNA {
   velocityTimeline: Array<{ time_sec: number; relative_speed: number }>;
   /** Per-frame zoom timeline (for zoompan expression building) */
   zoomTimeline: Array<{ time_sec: number; zoomSpeed: number }>;
+  /** Per-frame camera motion timeline (pan/shake signals) */
+  cameraMotionTimeline: Array<{
+    time_sec: number;
+    panX: number;
+    panY: number;
+    magnitude: number;
+  }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,7 +267,10 @@ export interface RhythmDNA {
     lowFreqEnergy: number;
   }>;
   /** Distribution of beat classes (fractions summing to ~1) */
-  beatClassDistribution: Record<"hard_kick" | "snare" | "hi_hat" | "drop_moment", number>;
+  beatClassDistribution: Record<
+    "hard_kick" | "snare" | "hi_hat" | "drop_moment",
+    number
+  >;
   /** Time signature guess */
   timeSignature: "4/4" | "3/4" | "6/8" | "unknown";
 }
@@ -433,6 +441,8 @@ export interface AdaptedStyleDNA {
       rotAngle: number;
       scaleAmount: number;
     }>;
+    /** Exact camera displacement events (panX, panY) mapped proportionally */
+    panEvents: Array<{ time: number; x: number; y: number; magnitude: number }>;
   };
 
   // ── Adapted Color ─────────────────────────────────────────────────────────

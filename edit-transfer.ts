@@ -34,32 +34,29 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-
+import { generateFilterGraph } from "./server/editor/filter-graph-generator";
+import { adaptToTargetContent } from "./server/style/style-dna-adapter";
+import { extractStyleDNA } from "./server/style/style-dna-extractor";
 import type {
-  FullVideoMetadata,
+  BeatEvent,
+  ColorGradingResult,
   EditTransferResult,
+  FullVideoMetadata,
+  ShotBoundary,
+  ShotDetectionResult,
   VelocitySegment,
   VelocityTimelinePoint,
-  ColorGradingResult,
-  ShotDetectionResult,
-  ShotBoundary,
-  AudioBeatResult,
-  BeatEvent,
-  CameraMotionSample,
 } from "./server/types";
 import type { TargetContentContext } from "./server/types/style-dna";
 import {
+  cleanTempDir,
+  execAsync,
+  makeTempDir,
+  probeVideo,
   resolveFfmpeg,
   safeExe,
-  execAsync,
-  probeVideo,
-  makeTempDir,
-  cleanTempDir,
   writeTempFile,
 } from "./server/utils/ffmpeg";
-import { extractStyleDNA } from "./server/style/style-dna-extractor";
-import { adaptToTargetContent } from "./server/style/style-dna-adapter";
-import { generateFilterGraph } from "./server/editor/filter-graph-generator";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -119,18 +116,30 @@ async function renderOnColab(opts: {
 
     // Target video (required)
     const targetBuf = await fs.promises.readFile(opts.targetPath);
-    formData.append("target", new Blob([targetBuf], { type: "video/mp4" }), "target.mp4");
+    formData.append(
+      "target",
+      new Blob([targetBuf], { type: "video/mp4" }),
+      "target.mp4"
+    );
 
     // Reference video (optional — for audio)
     if (opts.referencePath && fs.existsSync(opts.referencePath)) {
       const refBuf = await fs.promises.readFile(opts.referencePath);
-      formData.append("reference", new Blob([refBuf], { type: "video/mp4" }), "reference.mp4");
+      formData.append(
+        "reference",
+        new Blob([refBuf], { type: "video/mp4" }),
+        "reference.mp4"
+      );
     }
 
     // HALD CLUT (optional)
     if (opts.haldPath && fs.existsSync(opts.haldPath)) {
       const haldBuf = await fs.promises.readFile(opts.haldPath);
-      formData.append("hald_clut", new Blob([haldBuf], { type: "image/png" }), "hald_clut.png");
+      formData.append(
+        "hald_clut",
+        new Blob([haldBuf], { type: "image/png" }),
+        "hald_clut.png"
+      );
     }
 
     // Filter graph — the __SENDCMD_PATH__ placeholder in the graph
@@ -173,7 +182,7 @@ async function renderOnColab(opts: {
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown");
       console.warn(
-        `[edit-transfer] Colab render returned ${response.status}: ${errText.slice(0, 500)}`,
+        `[edit-transfer] Colab render returned ${response.status}: ${errText.slice(0, 500)}`
       );
       return null;
     }
@@ -183,7 +192,7 @@ async function renderOnColab(opts: {
     const buf = Buffer.from(arrayBuf);
 
     console.log(
-      `[edit-transfer] ✅ Colab render succeeded: ${(buf.length / 1024).toFixed(0)}KB in ${renderMs}ms`,
+      `[edit-transfer] ✅ Colab render succeeded: ${(buf.length / 1024).toFixed(0)}KB in ${renderMs}ms`
     );
     return buf;
   } catch (err) {
@@ -193,7 +202,7 @@ async function renderOnColab(opts: {
       console.warn(
         `[edit-transfer] Colab render failed, falling back to local FFmpeg: ${
           err instanceof Error ? err.message : String(err)
-        }`,
+        }`
       );
     }
     return null;
@@ -224,7 +233,7 @@ export interface TransferOptions {
 export async function transferEdit(
   targetBuffer: Buffer,
   refMeta: FullVideoMetadata,
-  opts: TransferOptions = {},
+  opts: TransferOptions = {}
 ): Promise<EditTransferResult> {
   const t0 = performance.now();
   const tmp = makeTempDir("edit-transfer");
@@ -235,7 +244,11 @@ export async function transferEdit(
     // ── Write reference video to disk for audio extraction ────────────
     let referencePath: string | null = null;
     if (opts.referenceBuffer) {
-      referencePath = await writeTempFile(tmp, "reference.mp4", opts.referenceBuffer);
+      referencePath = await writeTempFile(
+        tmp,
+        "reference.mp4",
+        opts.referenceBuffer
+      );
     }
 
     const outputDir = path.join(process.cwd(), "public", "outputs");
@@ -251,7 +264,9 @@ export async function transferEdit(
       try {
         const refProbe = await probeVideo(referencePath);
         refDuration = refProbe.duration || refDuration;
-      } catch { /* use metadata duration */ }
+      } catch {
+        /* use metadata duration */
+      }
     }
 
     const cg = refMeta.colorGrading;
@@ -289,33 +304,39 @@ export async function transferEdit(
     const h = opts.outputHeight ?? 1920;
 
     // ── Stage 1: Extract StyleDNA from reference metadata ─────────────
-    console.log("[edit-transfer] Stage 1: Extracting StyleDNA from reference...");
+    console.log(
+      "[edit-transfer] Stage 1: Extracting StyleDNA from reference..."
+    );
     const refDNA = extractStyleDNA(refMeta);
     console.log(
-      `[edit-transfer] StyleDNA extracted: ` +
+      "[edit-transfer] StyleDNA extracted: " +
         `pacing=${refDNA.pacing.editingPace}(${refDNA.pacing.cutDensity.toFixed(2)}cuts/s), ` +
         `motion=${refDNA.motion.velocityProfile}(energy=${refDNA.motion.cameraEnergy.toFixed(2)}), ` +
         `rhythm=${refDNA.rhythm.bpm.toFixed(0)}bpm(${refDNA.rhythm.dropZones.length}drops), ` +
         `lighting=flicker${refDNA.lighting.flickerFreq.toFixed(1)}Hz, ` +
-        `texture=${refDNA.texture.filmStockLabel}(grain=${refDNA.texture.grainProfile.strength})`,
+        `texture=${refDNA.texture.filmStockLabel}(grain=${refDNA.texture.grainProfile.strength})`
     );
 
     // ── Stage 2: Build target context + semantic adaptation ───────────
-    console.log("[edit-transfer] Stage 2: Semantic adaptation to target content...");
+    console.log(
+      "[edit-transfer] Stage 2: Semantic adaptation to target content..."
+    );
 
     const targetCtx: TargetContentContext = {
       duration: targetDuration,
       beatEvents: (ab.beatEvents ?? []).map((b) => ({
         ...b,
-        timestamp_sec: refDuration > 0
-          ? (b.timestamp_sec / refDuration) * targetDuration
-          : b.timestamp_sec,
+        timestamp_sec:
+          refDuration > 0
+            ? (b.timestamp_sec / refDuration) * targetDuration
+            : b.timestamp_sec,
       })),
       shotBoundaries: sd.cuts.map((c) => ({
         ...c,
-        timestamp_sec: refDuration > 0
-          ? (c.timestamp_sec / refDuration) * targetDuration
-          : c.timestamp_sec,
+        timestamp_sec:
+          refDuration > 0
+            ? (c.timestamp_sec / refDuration) * targetDuration
+            : c.timestamp_sec,
       })),
       motionData: mo,
       depthData: refMeta.depth,
@@ -325,17 +346,23 @@ export async function transferEdit(
 
     const adaptedDNA = adaptToTargetContent(refDNA, targetCtx);
     console.log(
-      `[edit-transfer] Adaptation complete: ` +
+      "[edit-transfer] Adaptation complete: " +
         `${adaptedDNA.pacing.cutTimestamps.length} semantic cuts, ` +
         `${adaptedDNA.motion.jitterEvents.length} jitter events, ` +
         `${adaptedDNA.color.temporalSendcmd.length} color events, ` +
         `${adaptedDNA.rhythm.beatPulseEvents.length} beat pulses, ` +
-        `${adaptedDNA.texture.blurEvents.length} blur events`,
+        `${adaptedDNA.texture.blurEvents.length} blur events`
     );
 
     // ── Shot-only segmentation (unchanged — TransNetV2 boundaries) ────
-    const hardCuts = sd.cuts.filter((c) => c.type === "hard_cut" && c.confidence > 0.2);
-    const shotOnlyCutTimes = buildShotOnlyCutPoints(hardCuts, targetDuration, refDuration);
+    const hardCuts = sd.cuts.filter(
+      (c) => c.type === "hard_cut" && c.confidence > 0.2
+    );
+    const shotOnlyCutTimes = buildShotOnlyCutPoints(
+      hardCuts,
+      targetDuration,
+      refDuration
+    );
     let useHardCutSegmentation = false;
     let hardCutGraph = "";
 
@@ -374,7 +401,7 @@ export async function transferEdit(
         useHardCutSegmentation = true;
         console.log(
           `[edit-transfer] Shot segmentation: ${segments.length} segments from ` +
-            `${shotOnlyCutTimes.length} TransNetV2 boundaries`,
+            `${shotOnlyCutTimes.length} TransNetV2 boundaries`
         );
       }
     }
@@ -408,7 +435,9 @@ export async function transferEdit(
 
     // ── Build the filter_complex graph string ─────────────────────────
     let filterGraph: string;
-    const videoSrcLabel = useHardCutSegmentation ? "[segmented]" : `[${vidIdx}:v]`;
+    const videoSrcLabel = useHardCutSegmentation
+      ? "[segmented]"
+      : `[${vidIdx}:v]`;
     const loopAudio = refDuration > 0 && targetDuration > refDuration * 1.05;
 
     // ── Temporal Smoothing — DISABLED (v10.1) ─────────────────────────
@@ -424,7 +453,7 @@ export async function transferEdit(
       graphParts.push(
         `${videoSrcLabel}${videoFilterChain}[v1]`,
         `[v1][${haldIdx}:v]haldclut[v2]`,
-        `[v2]pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`,
+        `[v2]pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`
       );
       filterGraph = graphParts.join(";");
     } else {
@@ -434,7 +463,9 @@ export async function transferEdit(
         graphParts.push(hardCutGraph);
       }
 
-      graphParts.push(`${videoSrcLabel}${videoFilterChain},pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`);
+      graphParts.push(
+        `${videoSrcLabel}${videoFilterChain},pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`
+      );
       filterGraph = graphParts.join(";");
     }
 
@@ -449,7 +480,7 @@ export async function transferEdit(
     if (hasRefAudio) {
       if (loopAudio) {
         inputs.push(`-stream_loop -1 -i "${referencePath}"`);
-        filterLog.push(`audio-loop:seamless`);
+        filterLog.push("audio-loop:seamless");
       } else {
         inputs.push(`-i "${referencePath}"`);
       }
@@ -463,34 +494,34 @@ export async function transferEdit(
     const audioFlags: string[] = [];
 
     if (hasRefAudio) {
-      mapping.push(`-map 0:a:0`);
+      mapping.push("-map 0:a:0");
       audioFlags.push(
         `-af "aloop=loop=-1:size=2e9,atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS,alimiter=limit=0.9"`,
-        `-c:a aac -b:a 192k`,
+        "-c:a aac -b:a 192k"
       );
       filterLog.push(`audio:aloop+atrim(${targetDuration.toFixed(1)}s)`);
     } else {
       mapping.push(`-map ${vidIdx}:a?`);
-      audioFlags.push(`-c:a aac -b:a 192k`);
+      audioFlags.push("-c:a aac -b:a 192k");
     }
 
     const codecFlags =
-      `-c:v libx264 -profile:v high -pix_fmt yuv420p -preset slow -crf 18 -threads 0`;
+      "-c:v libx264 -profile:v high -pix_fmt yuv420p -preset slow -crf 18 -threads 0";
 
-    const bitrateFlags =
-      `-b:v 5M -minrate 3M -maxrate 8M -bufsize 16M`;
+    const bitrateFlags = "-b:v 5M -minrate 3M -maxrate 8M -bufsize 16M";
 
     const filterGraphInline = fs.readFileSync(filterScriptPath, "utf-8");
     const ffmpegCmd = [
-      exe, "-y",
-      `-analyzeduration 100M -probesize 100M`,
+      exe,
+      "-y",
+      "-analyzeduration 100M -probesize 100M",
       ...inputs,
-      `-filter_complex`,
+      "-filter_complex",
       `"${filterGraphInline}"`,
       ...mapping,
       codecFlags,
       ...audioFlags,
-      `-movflags +faststart`,
+      "-movflags +faststart",
       bitrateFlags,
       `-t ${targetDuration.toFixed(3)}`,
       `"${outputPath}"`,
@@ -498,30 +529,37 @@ export async function transferEdit(
 
     console.log("[edit-transfer] Filter graph:", filterLog.join(" → "));
 
-    const temporalColorCmdContent = cmdFiles.temporalColor && fs.existsSync(cmdFiles.temporalColor)
-      ? fs.readFileSync(cmdFiles.temporalColor, "utf-8")
-      : null;
+    const temporalColorCmdContent =
+      cmdFiles.temporalColor && fs.existsSync(cmdFiles.temporalColor)
+        ? fs.readFileSync(cmdFiles.temporalColor, "utf-8")
+        : null;
 
-    const blurCmdContent = cmdFiles.blur && fs.existsSync(cmdFiles.blur)
-      ? fs.readFileSync(cmdFiles.blur, "utf-8")
-      : null;
+    const blurCmdContent =
+      cmdFiles.blur && fs.existsSync(cmdFiles.blur)
+        ? fs.readFileSync(cmdFiles.blur, "utf-8")
+        : null;
 
-    const transitionCmdContent = cmdFiles.transition && fs.existsSync(cmdFiles.transition)
-      ? fs.readFileSync(cmdFiles.transition, "utf-8")
-      : null;
+    const transitionCmdContent =
+      cmdFiles.transition && fs.existsSync(cmdFiles.transition)
+        ? fs.readFileSync(cmdFiles.transition, "utf-8")
+        : null;
 
-    const beatPulseContent: string | null = cmdFiles.beatPulse && fs.existsSync(cmdFiles.beatPulse)
-      ? fs.readFileSync(cmdFiles.beatPulse, "utf-8")
-      : null;
+    const beatPulseContent: string | null =
+      cmdFiles.beatPulse && fs.existsSync(cmdFiles.beatPulse)
+        ? fs.readFileSync(cmdFiles.beatPulse, "utf-8")
+        : null;
 
-    const impactCmdContent: string | null = cmdFiles.impact && fs.existsSync(cmdFiles.impact)
-      ? fs.readFileSync(cmdFiles.impact, "utf-8")
-      : null;
+    const impactCmdContent: string | null =
+      cmdFiles.impact && fs.existsSync(cmdFiles.impact)
+        ? fs.readFileSync(cmdFiles.impact, "utf-8")
+        : null;
 
     const colabConfigured = !!process.env.COLAB_GPU_URL;
 
     if (colabConfigured) {
-      console.log("[edit-transfer] 🚀 COLAB_GPU_URL is set — using Colab as primary render");
+      console.log(
+        "[edit-transfer] 🚀 COLAB_GPU_URL is set — using Colab as primary render"
+      );
 
       const colabResult = await renderOnColab({
         targetPath,
@@ -544,14 +582,24 @@ export async function transferEdit(
       if (colabResult) {
         await fs.promises.writeFile(outputPath, colabResult);
         filterLog.push("render:colab-gpu(h264_nvenc)");
-        console.log(`[edit-transfer] ✅ Colab GPU render saved to ${outputPath}`);
+        console.log(
+          `[edit-transfer] ✅ Colab GPU render saved to ${outputPath}`
+        );
       } else {
-        console.error("═══════════════════════════════════════════════════════════");
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
         console.error("[edit-transfer] COLAB GPU RENDER FAILED");
-        console.error("[edit-transfer] COLAB_GPU_URL was set but the render did not succeed.");
-        console.error("[edit-transfer] Check that the Colab notebook is running and the");
+        console.error(
+          "[edit-transfer] COLAB_GPU_URL was set but the render did not succeed."
+        );
+        console.error(
+          "[edit-transfer] Check that the Colab notebook is running and the"
+        );
         console.error("[edit-transfer] ngrok tunnel URL in .env is current.");
-        console.error("═══════════════════════════════════════════════════════════");
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
 
         return {
           success: false,
@@ -565,29 +613,46 @@ export async function transferEdit(
       }
     } else {
       console.warn(
-        "[edit-transfer] ⚠ COLAB_GPU_URL not set — using local FFmpeg (slower, CPU-only)",
+        "[edit-transfer] ⚠ COLAB_GPU_URL not set — using local FFmpeg (slower, CPU-only)"
       );
       filterLog.push("render:local-ffmpeg(emergency)");
       console.log("[edit-transfer] FFmpeg command:", ffmpegCmd);
 
       try {
-        const { stderr } = await execAsync(ffmpegCmd, { maxBuffer: 200 * 1024 * 1024 });
+        const { stderr } = await execAsync(ffmpegCmd, {
+          maxBuffer: 200 * 1024 * 1024,
+        });
         if (stderr) {
           const lastLines = stderr.split("\n").slice(-15).join("\n");
-          console.log("[edit-transfer] FFmpeg stderr (last 15 lines):\n", lastLines);
+          console.log(
+            "[edit-transfer] FFmpeg stderr (last 15 lines):\n",
+            lastLines
+          );
         }
       } catch (ffErr: unknown) {
-        const errObj = ffErr as { stderr?: string; stdout?: string; message?: string };
+        const errObj = ffErr as {
+          stderr?: string;
+          stdout?: string;
+          message?: string;
+        };
         const fullStderr = errObj.stderr || "";
         const fullMsg = errObj.message || String(ffErr);
 
-        console.error("═══════════════════════════════════════════════════════════");
-        console.error("[edit-transfer] LOCAL FFMPEG FAILED (emergency fallback)");
-        console.error("═══════════════════════════════════════════════════════════");
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
+        console.error(
+          "[edit-transfer] LOCAL FFMPEG FAILED (emergency fallback)"
+        );
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
         console.error("[edit-transfer] Command:\n", ffmpegCmd);
         console.error("[edit-transfer] Full stderr:\n", fullStderr);
         console.error("[edit-transfer] Error message:\n", fullMsg);
-        console.error("═══════════════════════════════════════════════════════════");
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
 
         return {
           success: false,
@@ -616,7 +681,7 @@ export async function transferEdit(
     if (outputSizeKB < 50) {
       console.error(
         `[edit-transfer] ⚠ Output file suspiciously small: ${outputSizeKB.toFixed(1)}KB. ` +
-        `Likely bitrate collapse / black video. Filter chain: ${filterLog.join(" → ")}`
+          `Likely bitrate collapse / black video. Filter chain: ${filterLog.join(" → ")}`
       );
       // Don't fail — user might still want the file — but log prominently
     }
@@ -665,7 +730,7 @@ export async function transferEdit(
 async function generateHaldClut(
   exe: string,
   outputPath: string,
-  cg: ColorGradingResult,
+  cg: ColorGradingResult
 ): Promise<boolean> {
   try {
     const filters: string[] = [];
@@ -694,7 +759,7 @@ async function generateHaldClut(
     const cmd = [
       exe,
       "-y",
-      `-analyzeduration 100M -probesize 100M`,
+      "-analyzeduration 100M -probesize 100M",
       `-f lavfi -i "haldclutsrc=level=8"`,
       `-filter_complex_script "${scriptPath}"`,
       `-map "[vout]"`,
@@ -707,12 +772,17 @@ async function generateHaldClut(
     // Validate CLUT was generated with reasonable size (identity CLUT ≈ 600-800KB)
     const stat = fs.statSync(outputPath);
     if (stat.size < 1000) {
-      console.warn(`[edit-transfer] HALD CLUT suspiciously small (${stat.size}B) — skipping CLUT`);
+      console.warn(
+        `[edit-transfer] HALD CLUT suspiciously small (${stat.size}B) — skipping CLUT`
+      );
       return false;
     }
     return true;
   } catch (err) {
-    console.warn("[edit-transfer] HALD CLUT generation failed:", err instanceof Error ? err.message : err);
+    console.warn(
+      "[edit-transfer] HALD CLUT generation failed:",
+      err instanceof Error ? err.message : err
+    );
     return false;
   }
 }
@@ -764,14 +834,14 @@ interface ResolvedSegment {
 
 function buildSetptsExpr(
   velocitySegments: VelocitySegment[],
-  targetDuration: number,
+  targetDuration: number
 ): string | null {
   if (!velocitySegments || velocitySegments.length === 0) return null;
 
   // ── Step 1: derive canonical single-loop pattern ────────────────────
   // Sort by start_sec and ensure contiguous coverage
   const canonical = [...velocitySegments].sort(
-    (a, b) => a.start_sec - b.start_sec,
+    (a, b) => a.start_sec - b.start_sec
   );
   const refEnd = Math.max(...canonical.map((s) => s.end_sec));
   if (refEnd <= 0) return null;
@@ -887,11 +957,14 @@ function clampSpeed(speed: number): number {
 function buildDirectKeyframeSetpts(
   timeline: VelocityTimelinePoint[],
   targetDuration: number,
-  refDuration: number,
+  refDuration: number
 ): string | null {
   if (!timeline || timeline.length < 2) return null;
 
-  const refEnd = Math.max(refDuration, timeline[timeline.length - 1].time_sec + 0.01);
+  const refEnd = Math.max(
+    refDuration,
+    timeline[timeline.length - 1].time_sec + 0.01
+  );
   const scale = targetDuration / refEnd;
 
   // Build resolved segments from consecutive keyframe pairs.
@@ -938,9 +1011,10 @@ function buildDirectKeyframeSetpts(
     let cursor = 0;
     for (let i = 0; i < keyframes.length; i += step) {
       const kf = keyframes[i];
-      const end = (i + step < keyframes.length)
-        ? keyframes[i + step].inStart
-        : targetDuration;
+      const end =
+        i + step < keyframes.length
+          ? keyframes[i + step].inStart
+          : targetDuration;
       const dur = end - kf.inStart;
       decimated.push({
         inStart: kf.inStart,
@@ -987,7 +1061,7 @@ function buildDirectKeyframeZoomExpr(
   zoomTimeline: Array<{ time_sec: number; zoomSpeed: number }>,
   targetDuration: number,
   w: number,
-  h: number,
+  h: number
 ): string | null {
   if (zoomTimeline.length < 2) return null;
 
@@ -1079,7 +1153,7 @@ function buildDynamicZoomExpr(
   zoomTimeline: Array<{ time_sec: number; zoomSpeed: number }>,
   targetDuration: number,
   w: number,
-  h: number,
+  h: number
 ): string | null {
   if (zoomTimeline.length < 2) return null;
 
@@ -1119,11 +1193,15 @@ function buildDynamicZoomExpr(
   // Final region
   const lastSample = zoomTimeline[zoomTimeline.length - 1];
   const avgFinal = regSpeeds.reduce((a, b) => a + b, 0) / regSpeeds.length;
-  regions.push({ start: regStart, end: lastSample.time_sec, avgSpeed: avgFinal });
+  regions.push({
+    start: regStart,
+    end: lastSample.time_sec,
+    avgSpeed: avgFinal,
+  });
 
   // Filter out very short or very weak zoom regions
   const significant = regions.filter(
-    (r) => r.end - r.start > 0.15 && Math.abs(r.avgSpeed) > 0.05,
+    (r) => r.end - r.start > 0.15 && Math.abs(r.avgSpeed) > 0.05
   );
 
   if (significant.length === 0) return null;
@@ -1192,7 +1270,7 @@ function buildDynamicZoomExpr(
 function buildSignalColorDNA(
   sd: ShotDetectionResult,
   cg: ColorGradingResult,
-  _targetDuration: number,
+  _targetDuration: number
 ): string[] {
   const cuts = sd.cuts;
   if (!cuts || cuts.length === 0) return [];
@@ -1212,7 +1290,11 @@ function buildSignalColorDNA(
   const brightnessDelta = clampRange((ecrMean - 0.5) * 0.06, -0.04, 0.04);
   const saturationDelta = clampRange(histMean * 0.2, 0, 0.18);
 
-  if (contrastDelta > 0.02 || Math.abs(brightnessDelta) > 0.005 || saturationDelta > 0.02) {
+  if (
+    contrastDelta > 0.02 ||
+    Math.abs(brightnessDelta) > 0.005 ||
+    saturationDelta > 0.02
+  ) {
     const c = (1.0 + contrastDelta).toFixed(3);
     const b = brightnessDelta.toFixed(4);
     const s = (1.0 + saturationDelta).toFixed(3);
@@ -1256,14 +1338,14 @@ function clampRange(value: number, min: number, max: number): number {
 function applyDTWAlignment(
   cutTimes: number[],
   beatEvents: BeatEvent[],
-  targetDuration: number,
+  targetDuration: number
 ): number[] {
   if (cutTimes.length < 3 || beatEvents.length === 0) return cutTimes;
 
   // Map each cut time to the nearest beat's intensity
   const intensities = cutTimes.map((t) => {
     let nearest = beatEvents[0];
-    let minDist = Infinity;
+    let minDist = Number.POSITIVE_INFINITY;
     for (const b of beatEvents) {
       // Use modulo to handle tiled beats
       const dist = Math.abs((b.timestamp_sec % targetDuration) - t);
@@ -1286,13 +1368,12 @@ function applyDTWAlignment(
     if (intensity >= strongThreshold) return t; // Strong: locked
 
     // Drift toward nearest strong beat
-    const maxDrift =
-      0.08 * (targetDuration / Math.max(1, cutTimes.length));
+    const maxDrift = 0.08 * (targetDuration / Math.max(1, cutTimes.length));
     const driftFactor =
       Math.max(0, 1 - intensity / Math.max(avgIntensity, 0.01)) * maxDrift;
 
     let nearestStrongTime = t;
-    let nearestDist = Infinity;
+    let nearestDist = Number.POSITIVE_INFINITY;
     for (let j = 0; j < cutTimes.length; j++) {
       if (
         intensities[j] >= strongThreshold &&
@@ -1353,7 +1434,7 @@ const MIN_CUT_GAP = 0.08;
 function buildShotOnlyCutPoints(
   hardCuts: ShotBoundary[],
   targetDuration: number,
-  refDuration: number,
+  refDuration: number
 ): number[] {
   // Only use TransNetV2 shot boundaries — NO beat events, NO gap filling.
   // This produces clean cuts at actual scene changes only.
@@ -1370,12 +1451,12 @@ function buildShotOnlyCutPoints(
   if (rawCuts.length === 0) return [];
 
   // Sort and de-duplicate with MIN_CUT_GAP = 0.5s
-  const sorted = [...new Set(rawCuts.map((t) => parseFloat(t.toFixed(3))))].sort(
-    (a, b) => a - b,
-  );
+  const sorted = [
+    ...new Set(rawCuts.map((t) => Number.parseFloat(t.toFixed(3)))),
+  ].sort((a, b) => a - b);
 
   const deduped: number[] = [];
-  let lastCut = -Infinity;
+  let lastCut = Number.NEGATIVE_INFINITY;
   for (const t of sorted) {
     if (t - lastCut >= MIN_CUT_GAP) {
       deduped.push(t);
@@ -1427,27 +1508,74 @@ interface TransitionAssignment {
 function assignTransitionPresets(
   cutTimes: number[],
   beatEvents: BeatEvent[],
-  segments: Array<{ start: number; end: number }>,
+  segments: Array<{ start: number; end: number }>
 ): Array<TransitionAssignment | null> {
   // High-energy presets (intensity ≥ 0.7)
   const highPresets: TransitionAssignment[] = [
-    { kind: "zoom_hit", effectDurationSec: 0.1, intensity: 1, scaleFrom: 1.0, scaleTo: 1.15 },
-    { kind: "flash", effectDurationSec: 0.08, intensity: 1, brightnessSpikeMultiplier: 3.0 },
-    { kind: "rgb_split", effectDurationSec: 0.08, intensity: 1, glitchOffsetPx: 12 },
+    {
+      kind: "zoom_hit",
+      effectDurationSec: 0.1,
+      intensity: 1,
+      scaleFrom: 1.0,
+      scaleTo: 1.15,
+    },
+    {
+      kind: "flash",
+      effectDurationSec: 0.08,
+      intensity: 1,
+      brightnessSpikeMultiplier: 3.0,
+    },
+    {
+      kind: "rgb_split",
+      effectDurationSec: 0.08,
+      intensity: 1,
+      glitchOffsetPx: 12,
+    },
   ];
 
   // Medium-energy presets (intensity 0.4–0.7)
   const medPresets: TransitionAssignment[] = [
-    { kind: "whip_pan", effectDurationSec: 0.12, intensity: 0.7, blurSigma: 25 },
-    { kind: "glitch", effectDurationSec: 0.06, intensity: 0.7, glitchOffsetPx: 8 },
-    { kind: "motion_blur_swipe", effectDurationSec: 0.1, intensity: 0.7, blurSigma: 30 },
-    { kind: "zoom_out_hit", effectDurationSec: 0.1, intensity: 0.7, scaleFrom: 1.15, scaleTo: 1.0 },
+    {
+      kind: "whip_pan",
+      effectDurationSec: 0.12,
+      intensity: 0.7,
+      blurSigma: 25,
+    },
+    {
+      kind: "glitch",
+      effectDurationSec: 0.06,
+      intensity: 0.7,
+      glitchOffsetPx: 8,
+    },
+    {
+      kind: "motion_blur_swipe",
+      effectDurationSec: 0.1,
+      intensity: 0.7,
+      blurSigma: 30,
+    },
+    {
+      kind: "zoom_out_hit",
+      effectDurationSec: 0.1,
+      intensity: 0.7,
+      scaleFrom: 1.15,
+      scaleTo: 1.0,
+    },
   ];
 
   // Low-energy presets (intensity < 0.4)
   const lowPresets: TransitionAssignment[] = [
-    { kind: "cross_blur", effectDurationSec: 0.14, intensity: 0.4, blurSigma: 8 },
-    { kind: "luma_fade", effectDurationSec: 0.15, intensity: 0.4, brightnessSpikeMultiplier: 1.5 },
+    {
+      kind: "cross_blur",
+      effectDurationSec: 0.14,
+      intensity: 0.4,
+      blurSigma: 8,
+    },
+    {
+      kind: "luma_fade",
+      effectDurationSec: 0.15,
+      intensity: 0.4,
+      brightnessSpikeMultiplier: 1.5,
+    },
   ];
 
   const assignments: Array<TransitionAssignment | null> = [];
@@ -1462,7 +1590,7 @@ function assignTransitionPresets(
 
     // Find nearest beat to this cut point
     let nearestBeat: BeatEvent | null = null;
-    let nearestDist = Infinity;
+    let nearestDist = Number.POSITIVE_INFINITY;
     for (const b of beatEvents) {
       const dist = Math.abs(b.timestamp_sec - cutTime);
       if (dist < nearestDist) {
@@ -1471,7 +1599,8 @@ function assignTransitionPresets(
       }
     }
 
-    const beatIntensity = (nearestBeat && nearestDist < 0.5) ? nearestBeat.intensity : 0.3;
+    const beatIntensity =
+      nearestBeat && nearestDist < 0.5 ? nearestBeat.intensity : 0.3;
 
     // Select preset based on intensity
     let pool: TransitionAssignment[];
@@ -1504,7 +1633,7 @@ function assignTransitionPresets(
  */
 function buildTransitionFilter(
   transition: TransitionAssignment,
-  segDuration: number,
+  segDuration: number
 ): string | null {
   const dur = Math.min(transition.effectDurationSec, segDuration * 0.3);
   if (dur < 0.02) return null;
@@ -1525,7 +1654,7 @@ function buildTransitionFilter(
       const scaleStart = (transition.scaleFrom ?? 1.15).toFixed(2);
       const frames = Math.round(dur * 30);
       // Linear interpolation from scaleStart to 1.0
-      return `zoompan=z='if(between(on,0,${frames}),${scaleStart}-${((parseFloat(scaleStart) - 1.0) / frames).toFixed(5)}*on,1)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=iw:ih:fps=30`;
+      return `zoompan=z='if(between(on,0,${frames}),${scaleStart}-${((Number.parseFloat(scaleStart) - 1.0) / frames).toFixed(5)}*on,1)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=iw:ih:fps=30`;
     }
 
     // ── Flash: brightness + contrast spike ──────────────────────────

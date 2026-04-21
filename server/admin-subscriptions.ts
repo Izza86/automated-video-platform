@@ -1,8 +1,8 @@
 "use server";
 
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db/drizzle";
-import { subscription, subscriptionPlan, user, payment } from "@/db/schema";
-import { eq, desc, and, gte, sql } from "drizzle-orm";
+import { payment, subscription, subscriptionPlan, user } from "@/db/schema";
 
 /**
  * Get all subscriptions with user and plan details (Admin only)
@@ -91,7 +91,11 @@ export async function getSubscriptionStats() {
     .where(eq(payment.status, "succeeded"));
 
   // Revenue this month
-  const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const firstDayOfMonth = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    1
+  );
   const monthlyRevenueResult = await db
     .select({
       total: sql<number>`COALESCE(SUM(CAST(${payment.amount} AS DECIMAL)), 0)`,

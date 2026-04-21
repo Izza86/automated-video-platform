@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { existsSync, statSync, createReadStream } from "fs";
+import { createReadStream, existsSync, statSync } from "fs";
+import { type NextRequest, NextResponse } from "next/server";
 import { join } from "path";
 
 /**
@@ -14,7 +14,7 @@ import { join } from "path";
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ filename: string }> },
+  { params }: { params: Promise<{ filename: string }> }
 ) {
   const { filename } = await params;
 
@@ -36,8 +36,8 @@ export async function GET(
   // ── Range request (required for video seeking) ──────────────────
   if (rangeHeader) {
     const parts = rangeHeader.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const start = Number.parseInt(parts[0], 10);
+    const end = parts[1] ? Number.parseInt(parts[1], 10) : fileSize - 1;
     const chunkSize = end - start + 1;
 
     // Read the requested range

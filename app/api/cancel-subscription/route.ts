@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
-import { auth } from "@/lib/auth";
+import { and, eq } from "drizzle-orm";
 import { headers } from "next/headers";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/drizzle";
 import { subscription } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+import { stripe } from "@/lib/stripe";
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,11 +45,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Cancel subscription at period end
-    const stripeSubscription = await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: true,
-    });
+    const stripeSubscription = await stripe.subscriptions.update(
+      subscriptionId,
+      {
+        cancel_at_period_end: true,
+      }
+    );
 
-    return NextResponse.json({ success: true, subscription: stripeSubscription });
+    return NextResponse.json({
+      success: true,
+      subscription: stripeSubscription,
+    });
   } catch (error) {
     console.error("Cancel subscription error:", error);
     return NextResponse.json(

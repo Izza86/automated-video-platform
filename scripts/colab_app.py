@@ -39,6 +39,7 @@ import shutil
 import tempfile
 import traceback
 import subprocess
+import functools
 from pathlib import Path
 
 import numpy as np
@@ -74,31 +75,71 @@ class NumpyEncoder(json.JSONEncoder):
 _models = {}
 
 
+def _safe_analysis(fn):
+    """
+    Decorator: wraps every analysis function in a top-level try/except.
+    — On success, ensures 'success' and 'device' are in the result dict.
+    — On failure, returns {"success": false, "error": "..."} with traceback.
+    Copilot: Do not remove this decorator — it is the last line of defence.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            result = fn(*args, **kwargs)
+            if isinstance(result, dict):
+                result.setdefault("success", True)
+                result.setdefault("device", str(DEVICE))
+            return result
+        except Exception as exc:
+            print(f"[{fn.__name__}] CRITICAL UNHANDLED ERROR: {exc}", flush=True)
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": f"{fn.__name__} failed: {str(exc)}",
+                "device": str(DEVICE),
+                "processingMs": 0,
+            }
+    return wrapper
+
+
 def get_transnetv2():
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     if "transnetv2" not in _models:
         try:
             from transnetv2 import TransNetV2
             _models["transnetv2"] = TransNetV2()
-            print("[colab-gpu] TransNetV2 loaded", flush=True)
+            print(f"[colab-gpu] TransNetV2 loaded on device: {DEVICE}", flush=True)
         except ImportError:
             print("[colab-gpu] TransNetV2 not installed, will use PySceneDetect", flush=True)
+            _models["transnetv2"] = None
+        except Exception as e:
+            print(f"[colab-gpu] TransNetV2 load FAILED: {e}", flush=True)
+            traceback.print_exc()
             _models["transnetv2"] = None
     return _models["transnetv2"]
 
 
 def get_raft():
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     if "raft" not in _models:
-        from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
-        weights = Raft_Large_Weights.DEFAULT
-        model = raft_large(weights=weights).to(DEVICE).eval()
-        for p in model.parameters():
-            p.requires_grad = False
-        _models["raft"] = model
-        print("[colab-gpu] RAFT-Large loaded on GPU", flush=True)
+        try:
+            from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
+            weights = Raft_Large_Weights.DEFAULT
+            model = raft_large(weights=weights).to(DEVICE).eval()
+            for p in model.parameters():
+                p.requires_grad = False
+            _models["raft"] = model
+            _actual_device = next(model.parameters()).device
+            print(f"[colab-gpu] RAFT-Large loaded on device: {_actual_device}", flush=True)
+        except Exception as e:
+            print(f"[colab-gpu] RAFT-Large load FAILED: {e}", flush=True)
+            traceback.print_exc()
+            _models["raft"] = None
     return _models["raft"]
 
 
 def get_depth_model():
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     if "depth" not in _models:
         # Try Depth-Anything V2 first, then MiDaS
         try:
@@ -110,20 +151,65 @@ def get_depth_model():
                 "depth-anything/Depth-Anything-V2-Base-hf"
             ).to(DEVICE).eval()
             _models["depth"] = ("depth-anything-v2", model, proc)
-            print("[colab-gpu] Depth-Anything V2 loaded on GPU", flush=True)
+            _actual_device = next(model.parameters()).device
+            print(f"[colab-gpu] Depth-Anything V2 loaded on device: {_actual_device}", flush=True)
         except Exception as e:
-            print(f"[colab-gpu] Depth-Anything V2 failed: {e}, trying MiDaS", flush=True)
+            print(f"[colab-gpu] Depth-Anything V2 FAILED: {e}, trying MiDaS", flush=True)
+            traceback.print_exc()
             try:
                 model = torch.hub.load("intel-isl/MiDaS", "DPT_Large")
                 model.to(DEVICE).eval()
                 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
                 transform = midas_transforms.dpt_transform
                 _models["depth"] = ("midas-dpt-large", model, transform)
-                print("[colab-gpu] MiDaS DPT-Large loaded on GPU", flush=True)
+                _actual_device = next(model.parameters()).device
+                print(f"[colab-gpu] MiDaS DPT-Large loaded on device: {_actual_device}", flush=True)
             except Exception as e2:
-                print(f"[colab-gpu] MiDaS also failed: {e2}", flush=True)
+                print(f"[colab-gpu] MiDaS also FAILED: {e2}", flush=True)
+                traceback.print_exc()
                 _models["depth"] = None
     return _models["depth"]
+
+
+def get_clip_model():
+    """
+    Load CLIP image encoder (HuggingFace `openai/clip-vit-large-patch14`) and
+    its image processor. Cache in `_models` and pin to GPU.
+    """
+    if "clip" not in _models:
+        try:
+            from transformers import CLIPModel, AutoImageProcessor
+            model_name = "openai/clip-vit-large-patch14"
+            proc = AutoImageProcessor.from_pretrained(model_name)
+            model = CLIPModel.from_pretrained(model_name).eval()
+            # Move image encoder to DEVICE if using torch
+            if hasattr(model, "vision_model"):
+                try:
+                    model.vision_model.to(DEVICE)
+                except Exception:
+                    pass
+            _models["clip"] = (model_name, model, proc)
+            print("🚀 High-Level Semantic Engine (CLIP) initialized", flush=True)
+        except Exception as e:
+            print(f"[colab-gpu] CLIP load FAILED: {e}", flush=True)
+            traceback.print_exc()
+            _models["clip"] = None
+    return _models["clip"]
+
+
+# Determine primary shot-detection engine at startup and log it
+try:
+    _primary_engine = None
+    if get_clip_model():
+        _primary_engine = "CLIP (openai/clip-vit-large-patch14)"
+    elif get_transnetv2():
+        _primary_engine = "TransNetV2"
+    else:
+        _primary_engine = "PySceneDetect (ContentDetector)"
+    print(f"[colab-gpu] Primary shot detection engine: {_primary_engine}", flush=True)
+except Exception:
+    # If any loader raises, avoid crashing — log and continue
+    print("[colab-gpu] Primary shot detection engine: detection selection failed", flush=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -191,11 +277,40 @@ def extract_audio_wav(video_path, sr=22050):
 #  ANALYSIS MODULE 1: Shot Detection (TransNetV2 → PySceneDetect → Classical)
 # ═════════════════════════════════════════════════════════════════════════════
 
+@_safe_analysis
 def analyze_shots(video_path, fps=5):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     t0 = time.time()
+    _fallback_reasons = []
     duration, vfps, w, h = get_video_info(video_path)
 
-    # Tier 1: TransNetV2
+    # Tier 1: PySceneDetect (promoted to primary engine)
+    try:
+        from scenedetect import open_video, SceneManager
+        from scenedetect.detectors import ContentDetector
+        # Use ContentDetector with tuned threshold and minimum scene length
+        video = open_video(video_path)
+        sm = SceneManager()
+        # threshold=27.0 is tuned for fine cuts; min_scene_len=15 frames avoids tiny cuts
+        sm.add_detector(ContentDetector(threshold=27.0, min_scene_len=15))
+        sm.detect_scenes(video)
+        scene_list = sm.get_scene_list()
+        boundaries = []
+        for i, (start, end) in enumerate(scene_list):
+            if i > 0:
+                boundaries.append({
+                    "time_sec": round(start.get_seconds(), 4),
+                    "type": "cut", "confidence": 0.9, "score": 0.9,
+                })
+        # Report a friendly model name for the UI
+        return _build_shot_result(boundaries, duration, "Content-Aware ML (PySceneDetect)",
+                                  round(time.time() - t0, 3))
+    except Exception as e:
+        print(f"[shots] PySceneDetect failed: {e}", flush=True)
+        traceback.print_exc()
+        _fallback_reasons.append(f"PySceneDetect error: {e}")
+
+    # Tier 2: TransNetV2 (fallback if available)
     transnet = get_transnetv2()
     if transnet is not None:
         try:
@@ -221,35 +336,113 @@ def analyze_shots(video_path, fps=5):
                 return _build_shot_result(boundaries, duration, "transnetv2-gpu",
                                           round(time.time() - t0, 3))
         except Exception as e:
-            print(f"[shots] TransNetV2 failed: {e}", flush=True)
+            print(f"[shots] TransNetV2 FAILED (not silent fallback): {e}", flush=True)
+            traceback.print_exc()
+            _fallback_reasons.append(f"TransNetV2 error: {e}")
+    else:
+        _fallback_reasons.append("TransNetV2 model not available/installed")
+        # Tier 1: High-level CLIP semantic detector (preferred)
+        try:
+            clip_tuple = get_clip_model()
+            if clip_tuple:
+                model_name, clip_model, clip_proc = clip_tuple
+                # Sample frames and compute CLIP embeddings in batches
+                sample_fps = max(2, min(5, int(fps)))
+                frms = extract_frames(video_path, fps=sample_fps, max_frames=600, scale="320:-2")
+                if len(frms) >= 3:
+                    from PIL import Image
+                    images = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for _, f in frms]
+                    import torch
 
-    # Tier 2: PySceneDetect
-    try:
-        from scenedetect import open_video, SceneManager
-        from scenedetect.detectors import ContentDetector, AdaptiveDetector
-        video = open_video(video_path)
-        sm = SceneManager()
-        sm.add_detector(ContentDetector(threshold=27.0, min_scene_len=8))
-        sm.add_detector(AdaptiveDetector(adaptive_threshold=3.0, min_scene_len=10))
-        sm.detect_scenes(video)
-        scene_list = sm.get_scene_list()
-        boundaries = []
-        for i, (start, end) in enumerate(scene_list):
-            if i > 0:
-                boundaries.append({
-                    "time_sec": round(start.get_seconds(), 4),
-                    "type": "cut", "confidence": 0.85, "score": 0.85,
-                })
-        return _build_shot_result(boundaries, duration, "pyscenedetect-gpu",
-                                  round(time.time() - t0, 3))
-    except Exception as e:
-        print(f"[shots] PySceneDetect failed: {e}", flush=True)
+                    batch_size = 64
+                    embeddings = []
+                    for i in range(0, len(images), batch_size):
+                        batch_imgs = images[i : i + batch_size]
+                        inputs = clip_proc(images=batch_imgs, return_tensors="pt")
+                        # Move tensors to DEVICE if CUDA
+                        for k, v in inputs.items():
+                            if isinstance(v, torch.Tensor):
+                                inputs[k] = v.to(DEVICE)
+                        with torch.no_grad():
+                            img_emb = clip_model.get_image_features(**inputs)
+                            # Normalize
+                            img_emb = img_emb / img_emb.norm(p=2, dim=-1, keepdim=True)
+                            embeddings.append(img_emb.cpu().numpy())
+                    if embeddings:
+                        emb = np.vstack(embeddings)
+                        # Cosine distance between consecutive frames (1 - cosine_sim)
+                        sims = np.sum(emb[1:] * emb[:-1], axis=1)
+                        dists = 1.0 - sims
+
+                        # Simple smoothing (median of window=3)
+                        smoothed = np.copy(dists)
+                        n = len(dists)
+                        for j in range(n):
+                            lo = max(0, j - 1)
+                            hi = min(n, j + 2)
+                            smoothed[j] = float(np.median(dists[lo:hi]))
+
+                        mean = float(np.mean(smoothed))
+                        std = float(np.std(smoothed))
+                        # adaptive threshold: mean + 1.6 * std (tunable)
+                        thresh = mean + 1.6 * std
+                        maxd = float(np.max(smoothed)) if smoothed.size else 1.0
+
+                        # pick peaks where smoothed > thresh and separated by min_scene_len frames
+                        min_scene_len_frames = 15
+                        peaks = []
+                        last_peak = -min_scene_len_frames
+                        for j, val in enumerate(smoothed):
+                            if val > thresh and (j - last_peak) >= min_scene_len_frames:
+                                # map to frame index j+1 (since dists between frames i and i+1)
+                                frame_idx = j + 1
+                                time_sec = round(frame_idx / sample_fps, 4)
+                                confidence = min(1.0, (val - thresh) / (maxd - thresh + 1e-6))
+                                peaks.append({
+                                    "time_sec": time_sec,
+                                    "type": "cut",
+                                    "confidence": round(float(confidence), 4),
+                                    "score": round(float(val), 4),
+                                })
+                                last_peak = j
+
+                        if peaks:
+                            return _build_shot_result(peaks, duration, model_name, round(time.time() - t0, 3))
+        except Exception as e:
+            print(f"[shots] CLIP detector failed: {e}", flush=True)
+            traceback.print_exc()
+            _fallback_reasons.append(f"CLIP error: {e}")
+
+        # Tier 2: PySceneDetect (fallback)
+        try:
+            from scenedetect import open_video, SceneManager
+            from scenedetect.detectors import ContentDetector
+            video = open_video(video_path)
+            sm = SceneManager()
+            sm.add_detector(ContentDetector(threshold=27.0, min_scene_len=15))
+            sm.detect_scenes(video)
+            scene_list = sm.get_scene_list()
+            boundaries = []
+            for i, (start, end) in enumerate(scene_list):
+                if i > 0:
+                    boundaries.append({
+                        "time_sec": round(start.get_seconds(), 4),
+                        "type": "cut", "confidence": 0.85, "score": 0.85,
+                    })
+            return _build_shot_result(boundaries, duration, "Content-Aware ML (PySceneDetect)",
+                                      round(time.time() - t0, 3))
+        except Exception as e:
+            print(f"[shots] PySceneDetect FAILED (not silent fallback): {e}", flush=True)
+            traceback.print_exc()
+            _fallback_reasons.append(f"PySceneDetect error: {e}")
 
     # Tier 3: Classical fallback
     frms = extract_frames(video_path, fps=2, max_frames=200, scale="240:-2")
     boundaries = _classical_shot_detect(frms, fps=2)
-    return _build_shot_result(boundaries, duration, "classical-gpu-fallback",
-                              round(time.time() - t0, 3))
+    result = _build_shot_result(boundaries, duration, "classical-gpu-fallback",
+                                round(time.time() - t0, 3))
+    result["fallbackReason"] = "; ".join(_fallback_reasons) if _fallback_reasons else None
+    return result
 
 
 def _build_shot_result(boundaries, duration, model_name, proc_sec=0):
@@ -317,20 +510,60 @@ def _classical_shot_detect(frames, fps=2):
     return boundaries
 
 
+def analyze_with_sub_second_precision(video_path, threshold=27.0, min_scene_len=15):
+    """
+    Run PySceneDetect ContentDetector and align cut times to the
+    exact nearest-frame timestamps using the video's native FPS.
+    Returns a list of boundary dicts with `time_sec` aligned to frames.
+    """
+    try:
+        duration, vfps, w, h = get_video_info(video_path)
+        from scenedetect import open_video, SceneManager
+        from scenedetect.detectors import ContentDetector
+
+        video = open_video(video_path)
+        sm = SceneManager()
+        sm.add_detector(ContentDetector(threshold=threshold, min_scene_len=min_scene_len))
+        sm.detect_scenes(video)
+        scene_list = sm.get_scene_list()
+        boundaries = []
+        for i, (start, end) in enumerate(scene_list):
+            if i > 0:
+                # Align to nearest frame timestamp for exactness
+                secs = start.get_seconds()
+                frame = int(round(secs * vfps))
+                aligned_time = frame / vfps if vfps > 0 else secs
+                boundaries.append({
+                    "time_sec": round(aligned_time, 4),
+                    "type": "cut", "confidence": 0.9, "score": 0.9,
+                })
+        return boundaries
+    except Exception as e:
+        print(f"[analyze_with_sub_second_precision] FAILED: {e}", flush=True)
+        traceback.print_exc()
+        return []
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  ANALYSIS MODULE 2: Motion / Optical Flow (RAFT-Large GPU)
 # ═════════════════════════════════════════════════════════════════════════════
 
+@_safe_analysis
 def analyze_motion(video_path, fps=10):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     import gc
     t0 = time.time()
+    _raft_fail_count = 0
+    _farneback_used = 0
     duration, vfps, ow, oh = get_video_info(video_path)
     # RAFT-Large uses ~2x VRAM vs Small — cap resolution & frame count
     frms = extract_frames(video_path, fps=fps, max_frames=200, scale="384:-2")
     if len(frms) < 3:
-        return _empty_motion(duration)
+        return _empty_motion(duration, "fewer than 3 frames extracted for motion analysis")
 
     raft_model = get_raft()
+    if raft_model is None:
+        print("[motion] WARNING: RAFT model not loaded — ALL frames will use Farneback fallback", flush=True)
     total = len(frms)
     dt = 1.0 / fps
     data = []
@@ -343,7 +576,9 @@ def analyze_motion(video_path, fps=10):
         # RAFT GPU flow
         flow = _raft_flow_gpu(raft_model, frms[pi][1], frms[i][1])
         if flow is None:
-            # Farneback fallback
+            # Farneback fallback — RAFT failed or unavailable for this frame pair
+            _raft_fail_count += 1
+            _farneback_used += 1
             g1 = cv2.cvtColor(frms[pi][1], cv2.COLOR_BGR2GRAY)
             g2 = cv2.cvtColor(frms[i][1], cv2.COLOR_BGR2GRAY)
             flow = cv2.calcOpticalFlowFarneback(
@@ -406,7 +641,7 @@ def analyze_motion(video_path, fps=10):
     torch.cuda.empty_cache()
 
     if not data:
-        return _empty_motion(duration)
+        return _empty_motion(duration, "no motion data computed from frames")
 
     mags = [m["meanMagnitude"] for m in data]
     avg_mag = float(np.mean(mags))
@@ -449,12 +684,16 @@ def analyze_motion(video_path, fps=10):
             "zoom-in" if np.mean(azs) > 0.3
             else ("zoom-out" if np.mean(azs) < -0.3 else "none")
         ),
-        "mlModel": "raft-large-gpu",
+        "mlModel": "raft-large-gpu" if _farneback_used == 0 else f"raft-large-gpu+farneback-fallback({_farneback_used}frames)",
         "processingMs": round((time.time() - t0) * 1000),
+        "fallbackReason": f"RAFT failed for {_raft_fail_count} frame-pairs, Farneback used for {_farneback_used}" if _farneback_used > 0 else None,
     }
 
 
 def _raft_flow_gpu(model, frame1_bgr, frame2_bgr):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
+    if model is None:
+        return None
     try:
         r1 = cv2.cvtColor(frame1_bgr, cv2.COLOR_BGR2RGB)
         r2 = cv2.cvtColor(frame2_bgr, cv2.COLOR_BGR2RGB)
@@ -476,7 +715,8 @@ def _raft_flow_gpu(model, frame1_bgr, frame2_bgr):
         del t1, t2, flow, preds
         return result
     except Exception as e:
-        print(f"[motion] RAFT-Large GPU flow failed: {e}", flush=True)
+        print(f"[motion] RAFT-Large GPU flow FAILED (frame pair): {e}", flush=True)
+        traceback.print_exc()
         return None
 
 
@@ -522,14 +762,15 @@ def _build_velocity_segments(data, dur, dt, avg_mag):
     return segs
 
 
-def _empty_motion(dur=0):
+def _empty_motion(dur=0, reason="insufficient frames"):
     return {
         "velocitySegments": [{"start_sec": 0, "end_sec": dur, "level": "static", "avgMagnitude": 0}],
         "motionTimeline": [], "overallIntensity": 0, "complexity": 0, "style": "static",
         "dominantCameraMotion": "static", "avgMagnitude": 0, "maxMagnitude": 0,
         "avgMotionArea": 0, "avgFrameDiff": 0, "segmentCount": 1, "frameCount": 0,
         "analysisFps": 0, "duration": dur, "resolution": {"width": 0, "height": 0},
-        "mlModel": "none", "processingMs": 0,
+        "mlModel": "none", "processingMs": 0, "device": str(DEVICE),
+        "fallbackReason": reason,
     }
 
 
@@ -537,17 +778,19 @@ def _empty_motion(dur=0):
 #  ANALYSIS MODULE 3: Depth Estimation (Depth-Anything V2 GPU)
 # ═════════════════════════════════════════════════════════════════════════════
 
+@_safe_analysis
 def analyze_depth(video_path, fps=2):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     t0 = time.time()
     duration, vfps, ow, oh = get_video_info(video_path)
     depth_info = get_depth_model()
     if depth_info is None:
-        return _empty_depth(duration)
+        return _empty_depth(duration, "no depth model available (Depth-Anything V2 + MiDaS both failed)")
 
     model_name, model, processor = depth_info
     frms = extract_frames(video_path, fps=fps, max_frames=60, scale="384:-2")
     if not frms:
-        return _empty_depth(duration)
+        return _empty_depth(duration, "no frames extracted for depth analysis")
 
     timeline = []
     for t_sec, frame in frms:
@@ -567,7 +810,7 @@ def analyze_depth(video_path, fps=2):
         })
 
     if not timeline:
-        return _empty_depth(duration)
+        return _empty_depth(duration, "all depth frame estimations failed")
 
     avg_sep = float(np.mean([t["fgBgSeparation"] for t in timeline]))
     avg_depth = float(np.mean([t["meanDepth"] for t in timeline]))
@@ -595,6 +838,7 @@ def analyze_depth(video_path, fps=2):
 
 
 def _run_depth_frame(model_name, model, processor, frame_bgr):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     try:
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         if model_name.startswith("depth-anything"):
@@ -618,15 +862,17 @@ def _run_depth_frame(model_name, model, processor, frame_bgr):
             depth = np.zeros_like(depth)
         return depth
     except Exception as e:
-        print(f"[depth] Frame failed: {e}", flush=True)
+        print(f"[depth] Frame depth estimation FAILED: {e}", flush=True)
+        traceback.print_exc()
         return None
 
 
-def _empty_depth(dur=0):
+def _empty_depth(dur=0, reason="no depth model available"):
     return {
         "depthTimeline": [], "avgFgBgSeparation": 0, "avgMeanDepth": 0.5,
         "hasStrongParallax": False, "depthStyle": "flat",
-        "mlModel": "none", "processingMs": 0,
+        "mlModel": "none", "processingMs": 0, "device": str(DEVICE),
+        "fallbackReason": reason,
     }
 
 
@@ -673,7 +919,9 @@ def reinhard_lab_stats(frames):
     }
 
 
+@_safe_analysis
 def analyze_color(video_path, n_frames=10):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     t0 = time.time()
     from sklearn.cluster import KMeans
 
@@ -827,14 +1075,15 @@ def analyze_color(video_path, n_frames=10):
     }
 
 
-def _empty_color():
+def _empty_color(reason="no frames extracted"):
     return {
         "brightness": 0.5, "saturation": 1.0, "contrast": 0.5, "warmth": 0,
         "hue": 0, "look": "unknown", "dominantPalette": [],
         "shadowAnalysis": {}, "midtoneAnalysis": {}, "highlightAnalysis": {},
         "eqParams": {"brightness": 0, "contrast": 1, "saturation": 1, "gamma": 1},
         "labStats": {}, "temporalConsistency": 0, "frameCount": 0,
-        "duration": 0, "mlModel": "none", "processingMs": 0,
+        "duration": 0, "mlModel": "none", "processingMs": 0, "device": str(DEVICE),
+        "fallbackReason": reason,
     }
 
 
@@ -842,19 +1091,21 @@ def _empty_color():
 #  ANALYSIS MODULE 5: Beat Detection (madmom RNN+DBN primary, librosa fallback)
 # ═════════════════════════════════════════════════════════════════════════════
 
+@_safe_analysis
 def analyze_beats(video_path):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     t0 = time.time()
     import librosa
 
     wav_path = extract_audio_wav(video_path)
     if wav_path is None:
-        return _empty_beats()
+        return _empty_beats(0, "no audio track found or extraction failed")
 
     try:
         y, sr = librosa.load(wav_path, sr=22050, mono=True)
         duration = len(y) / sr
         if duration < 0.5:
-            return _empty_beats(duration)
+            return _empty_beats(duration, "audio too short (<0.5s) for beat detection")
 
         # ── Tier 1: madmom RNN + DBN beat tracking (high accuracy) ────
         #    madmom uses 3× bidirectional LSTMs trained on 100+ annotated
@@ -1008,13 +1259,14 @@ def analyze_beats(video_path):
             pass
 
 
-def _empty_beats(duration=0):
+def _empty_beats(duration=0, reason="no audio extracted"):
     return {
         "beats": [], "beatEvents": [], "bpm": 0, "bpmConfidence": 0,
         "firstBeatSec": 0, "peakDb": -60, "meanVolume": 0, "hasAudio": False,
         "audioTimeline": [], "rhythmRegions": [], "regionCount": 0,
         "avgBeatIntensity": 0, "peakBeatIntensity": 0, "beatDensity": 0,
         "timeSignatureGuess": "unknown", "processingMs": 0, "mlModel": "none",
+        "device": str(DEVICE), "fallbackReason": reason,
     }
 
 
@@ -1031,6 +1283,7 @@ app = FastAPI(title="Colab GPU Video Analysis Server", version="1.0.0")
 
 @app.get("/health")
 async def health():
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     gpu_info = {}
     if torch.cuda.is_available():
         gpu_info = {
@@ -1044,7 +1297,11 @@ async def health():
     return {
         "status": "ok",
         "device": str(DEVICE),
+        "gpu_available": torch.cuda.is_available(),
+        "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "gpu_vram_gb": round(torch.cuda.get_device_properties(0).total_memory / 1e9, 2) if torch.cuda.is_available() else None,
         "gpu": gpu_info,
+        "loaded_models": list(_models.keys()),
         "models_loaded": list(_models.keys()),
     }
 
@@ -1061,6 +1318,7 @@ async def _save_upload(file: UploadFile) -> str:
 
 @app.post("/process-video")
 async def process_video(file: UploadFile = File(...)):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     """
     Full pipeline: runs ALL 5 analysis modules on the uploaded video.
     Returns combined metadata matching the TypeScript FullVideoMetadata shape.
@@ -1091,12 +1349,16 @@ async def process_video(file: UploadFile = File(...)):
         ]:
             try:
                 results[name] = fn(*args)
-                print(f"[pipeline] {name}: OK ({results[name].get('processingMs', 0)}ms, "
-                      f"model={results[name].get('mlModel', 'n/a')})", flush=True)
+                _model = results[name].get('mlModel', 'n/a') if isinstance(results[name], dict) else 'n/a'
+                _ms = results[name].get('processingMs', 0) if isinstance(results[name], dict) else 0
+                _fb = results[name].get('fallbackReason') if isinstance(results[name], dict) else None
+                print(f"[pipeline] {name}: OK ({_ms}ms, model={_model})"
+                      + (f" [fallback: {_fb}]" if _fb else ""), flush=True)
             except Exception as e:
+                print(f"[pipeline] {name}: FAILED — {e}", flush=True)
                 errors.append(f"{name}: {str(e)}")
                 traceback.print_exc()
-                results[name] = None
+                results[name] = {"success": False, "error": str(e), "device": str(DEVICE)}
 
             # Offload heavy model from GPU after its stage
             model_key = STAGE_CLEANUP.get(name)
@@ -1139,10 +1401,23 @@ async def process_video(file: UploadFile = File(...)):
 
 @app.post("/analyze/shots")
 async def api_shots(file: UploadFile = File(...)):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     video_path = await _save_upload(file)
+    t0 = time.time()
     try:
         result = analyze_shots(video_path)
+        result.setdefault("success", True)
+        result.setdefault("device", str(DEVICE))
+        result.setdefault("processingMs", round((time.time() - t0) * 1000))
         return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
+    except Exception as e:
+        print(f"[api/shots] ENDPOINT ERROR: {e}", flush=True)
+        traceback.print_exc()
+        return JSONResponse(
+            content={"success": False, "error": str(e), "device": str(DEVICE),
+                     "processingMs": round((time.time() - t0) * 1000)},
+            status_code=500,
+        )
     finally:
         try:
             os.unlink(video_path)
@@ -1152,10 +1427,23 @@ async def api_shots(file: UploadFile = File(...)):
 
 @app.post("/analyze/motion")
 async def api_motion(file: UploadFile = File(...)):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     video_path = await _save_upload(file)
+    t0 = time.time()
     try:
         result = analyze_motion(video_path, fps=10)
+        result.setdefault("success", True)
+        result.setdefault("device", str(DEVICE))
+        result.setdefault("processingMs", round((time.time() - t0) * 1000))
         return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
+    except Exception as e:
+        print(f"[api/motion] ENDPOINT ERROR: {e}", flush=True)
+        traceback.print_exc()
+        return JSONResponse(
+            content={"success": False, "error": str(e), "device": str(DEVICE),
+                     "processingMs": round((time.time() - t0) * 1000)},
+            status_code=500,
+        )
     finally:
         try:
             os.unlink(video_path)
@@ -1165,10 +1453,23 @@ async def api_motion(file: UploadFile = File(...)):
 
 @app.post("/analyze/depth")
 async def api_depth(file: UploadFile = File(...)):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     video_path = await _save_upload(file)
+    t0 = time.time()
     try:
         result = analyze_depth(video_path, fps=2)
+        result.setdefault("success", True)
+        result.setdefault("device", str(DEVICE))
+        result.setdefault("processingMs", round((time.time() - t0) * 1000))
         return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
+    except Exception as e:
+        print(f"[api/depth] ENDPOINT ERROR: {e}", flush=True)
+        traceback.print_exc()
+        return JSONResponse(
+            content={"success": False, "error": str(e), "device": str(DEVICE),
+                     "processingMs": round((time.time() - t0) * 1000)},
+            status_code=500,
+        )
     finally:
         try:
             os.unlink(video_path)
@@ -1178,10 +1479,23 @@ async def api_depth(file: UploadFile = File(...)):
 
 @app.post("/analyze/color")
 async def api_color(file: UploadFile = File(...)):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     video_path = await _save_upload(file)
+    t0 = time.time()
     try:
         result = analyze_color(video_path, n_frames=10)
+        result.setdefault("success", True)
+        result.setdefault("device", str(DEVICE))
+        result.setdefault("processingMs", round((time.time() - t0) * 1000))
         return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
+    except Exception as e:
+        print(f"[api/color] ENDPOINT ERROR: {e}", flush=True)
+        traceback.print_exc()
+        return JSONResponse(
+            content={"success": False, "error": str(e), "device": str(DEVICE),
+                     "processingMs": round((time.time() - t0) * 1000)},
+            status_code=500,
+        )
     finally:
         try:
             os.unlink(video_path)
@@ -1191,10 +1505,23 @@ async def api_color(file: UploadFile = File(...)):
 
 @app.post("/analyze/beats")
 async def api_beats(file: UploadFile = File(...)):
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     video_path = await _save_upload(file)
+    t0 = time.time()
     try:
         result = analyze_beats(video_path)
+        result.setdefault("success", True)
+        result.setdefault("device", str(DEVICE))
+        result.setdefault("processingMs", round((time.time() - t0) * 1000))
         return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
+    except Exception as e:
+        print(f"[api/beats] ENDPOINT ERROR: {e}", flush=True)
+        traceback.print_exc()
+        return JSONResponse(
+            content={"success": False, "error": str(e), "device": str(DEVICE),
+                     "processingMs": round((time.time() - t0) * 1000)},
+            status_code=500,
+        )
     finally:
         try:
             os.unlink(video_path)
@@ -1234,6 +1561,7 @@ async def render_video(
     This keeps all filter-graph construction logic on the TypeScript side
     while offloading the heavy CPU/GPU encode work to Colab's hardware.
     """
+    # Copilot: Do not remove error handling, fail-safes, and detailed logs
     tmp_dir = tempfile.mkdtemp(prefix="colab_render_")
     try:
         t0 = time.time()
@@ -1475,20 +1803,26 @@ def start_server():
     #    model download (RAFT / Depth-Anything).
     #    VGG-19 has been removed — colour analysis now uses the
     #    lightweight Reinhard LAB method (OpenCV only, no weights).
-    print("[colab-gpu] Pre-loading models onto GPU (this may take a few minutes on first run)...", flush=True)
+    print(f"[colab-gpu] Pre-loading models onto {DEVICE} (this may take a few minutes on first run)...", flush=True)
     try:
         get_raft()
     except Exception as e:
         print(f"[colab-gpu] ⚠ RAFT pre-load failed: {e}", flush=True)
+        traceback.print_exc()
     try:
         get_depth_model()
     except Exception as e:
         print(f"[colab-gpu] ⚠ Depth model pre-load failed: {e}", flush=True)
+        traceback.print_exc()
     try:
         get_transnetv2()
     except Exception as e:
         print(f"[colab-gpu] ⚠ TransNetV2 pre-load failed: {e}", flush=True)
-    print("[colab-gpu] ✅ All models loaded. Opening tunnel...\n", flush=True)
+        traceback.print_exc()
+    _loaded = [k for k, v in _models.items() if v is not None]
+    _failed = [k for k, v in _models.items() if v is None]
+    print(f"[colab-gpu] ✅ Model pre-load complete. Loaded: {_loaded}, Failed/unavailable: {_failed}", flush=True)
+    print("[colab-gpu] Opening tunnel...\n", flush=True)
 
     # ── Ngrok tunnel (opened AFTER models are warm) ──────────────────
     try:

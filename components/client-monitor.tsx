@@ -2,7 +2,10 @@
 import dynamic from "next/dynamic";
 
 const PerformanceMonitor = dynamic(
-  () => import("@/components/performance-monitor").then((m) => m.PerformanceMonitor),
+  () =>
+    import("@/components/performance-monitor").then(
+      (m) => m.PerformanceMonitor
+    ),
   { ssr: false }
 );
 

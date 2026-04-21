@@ -1,11 +1,11 @@
 "use server";
 
-import { db } from "@/server/db";
-import { project } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
-import { getCurrentUser } from "./users";
+import { desc, eq } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
+import { project } from "@/db/schema";
+import { db } from "@/server/db";
+import { getCurrentUser } from "./users";
 
 export interface ProjectMetadata {
   templateName?: string;
@@ -37,19 +37,27 @@ export async function createProject(input: CreateProjectInput) {
     }
 
     console.log("Creating project for user:", user.currentUser.id);
-    console.log("Project input:", { ...input, videoUrl: input.videoUrl.substring(0, 50) + "..." });
+    console.log("Project input:", {
+      ...input,
+      videoUrl: input.videoUrl.substring(0, 50) + "...",
+    });
 
-    const newProject = await db.insert(project).values({
-      id: projectId,
-      userId: user.currentUser.id,
-      name: input.name,
-      type: input.type,
-      videoUrl: input.videoUrl,
-      thumbnail: input.thumbnail || null,
-      metadata: input.metadata ? JSON.parse(JSON.stringify(input.metadata)) : null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }).returning();
+    const newProject = await db
+      .insert(project)
+      .values({
+        id: projectId,
+        userId: user.currentUser.id,
+        name: input.name,
+        type: input.type,
+        videoUrl: input.videoUrl,
+        thumbnail: input.thumbnail || null,
+        metadata: input.metadata
+          ? JSON.parse(JSON.stringify(input.metadata))
+          : null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
 
     console.log("Project created successfully:", newProject[0].id);
     return { success: true, project: newProject[0] };
@@ -77,7 +85,11 @@ export async function createProject(input: CreateProjectInput) {
         };
 
         const fallbackPath = path.join(devDir, `${projectId}.json`);
-        await fs.promises.writeFile(fallbackPath, JSON.stringify(fallback, null, 2), "utf8");
+        await fs.promises.writeFile(
+          fallbackPath,
+          JSON.stringify(fallback, null, 2),
+          "utf8"
+        );
         console.log("Saved fallback project to disk:", fallbackPath);
 
         return { success: true, project: fallback };
@@ -94,7 +106,7 @@ export async function createProject(input: CreateProjectInput) {
 export async function getUserProjects() {
   try {
     const user = await getCurrentUser();
-    
+
     if (!user) {
       return { error: "User not authenticated" };
     }
@@ -115,7 +127,7 @@ export async function getUserProjects() {
 export async function deleteProject(projectId: string) {
   try {
     const user = await getCurrentUser();
-    
+
     if (!user) {
       return { error: "User not authenticated" };
     }
@@ -147,7 +159,7 @@ export async function deleteProject(projectId: string) {
 export async function getProject(projectId: string) {
   try {
     const user = await getCurrentUser();
-    
+
     if (!user) {
       return { error: "User not authenticated" };
     }

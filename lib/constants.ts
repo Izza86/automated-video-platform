@@ -8,7 +8,8 @@ export const APP_NAME = "Automated Video Editor";
 export const APP_SHORT_NAME = "AVE";
 export const APP_DESCRIPTION =
   "Professional AI-powered video editing platform. Clone any reference video's style — color grade, speed ramps, transitions — onto your target footage in one click.";
-export const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+export const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export const COMPANY = {
   name: "Automated Video Editor",
@@ -84,7 +85,12 @@ export const PRICING = {
 // ── Upload / Processing Limits ────────────────────────────────────────────
 export const MAX_FILE_SIZE_MB = 500;
 export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-export const SUPPORTED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm", "video/x-msvideo"];
+export const SUPPORTED_VIDEO_TYPES = [
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+  "video/x-msvideo",
+];
 export const MAX_VIDEO_DURATION_SECONDS = 300; // 5 minutes
 
 // ── Pagination ────────────────────────────────────────────────────────────
@@ -102,7 +108,16 @@ export const SECURITY_HEADERS = {
 } as const;
 
 // ── Routes ────────────────────────────────────────────────────────────────
-export const PUBLIC_ROUTES = ["/", "/login", "/signup", "/forgot-password", "/reset-password", "/pricing", "/privacy", "/terms"];
+export const PUBLIC_ROUTES = [
+  "/",
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/pricing",
+  "/privacy",
+  "/terms",
+];
 export const ADMIN_ROUTES_PREFIX = "/dashboard/admin";
 export const PROTECTED_ROUTES_PREFIX = "/dashboard";
 export const AUTH_ROUTES = ["/login", "/signup"];

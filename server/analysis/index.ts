@@ -8,7 +8,7 @@
  * tree-shake unused code and avoid compiling the entire module graph.
  */
 
-export { detectShots } from "./shot-detection";
-export { analyzeMotion } from "./motion-analysis";
 export { analyzeAudio } from "./audio-analysis";
 export { analyzeDepth } from "./depth-analysis";
+export { analyzeMotion } from "./motion-analysis";
+export { detectShots } from "./shot-detection";

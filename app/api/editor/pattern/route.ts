@@ -10,19 +10,19 @@
  * Response: JSON `EditingBlueprint`
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { analyzeVideo } from "../../../../server/pipeline/orchestrator";
+import { type NextRequest, NextResponse } from "next/server";
 import { analyzeEditingPattern } from "../../../../server/editor/pattern-analyzer";
+import { analyzeVideo } from "../../../../server/pipeline/orchestrator";
 
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
     const file = form.get("video");
 
-    if (!file || !(file instanceof File)) {
+    if (!(file && file instanceof File)) {
       return NextResponse.json(
         { error: "Missing 'video' file in form data." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     console.error("[/api/editor/pattern] Error:", message);
     return NextResponse.json(
       { success: false, error: message },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

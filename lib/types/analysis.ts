@@ -40,7 +40,13 @@ export interface DashboardData {
 export interface BlueprintEvent {
   time_sec: number;
   duration_sec: number;
-  kind: "cut" | "speed_ramp" | "beat_transition" | "style_keyframe" | "jhatka" | "rhythm_shift";
+  kind:
+    | "cut"
+    | "speed_ramp"
+    | "beat_transition"
+    | "style_keyframe"
+    | "jhatka"
+    | "rhythm_shift";
   confidence: number;
   description: string;
   source: "shot" | "motion" | "audio" | "style" | "fused";

@@ -2,28 +2,37 @@
 
 export function FooterWave() {
   return (
-    <div className="absolute inset-0 w-full h-full overflow-hidden">
+    <div className="absolute inset-0 h-full w-full overflow-hidden">
       {/* Wave SVG Animation - Fills entire footer */}
       <svg
-        className="absolute inset-0 w-full h-full"
-        viewBox="0 0 1440 320"
+        className="absolute inset-0 h-full w-full"
         preserveAspectRatio="none"
+        viewBox="0 0 1440 320"
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          <linearGradient id="waveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" style={{ stopColor: "#1e3a8a", stopOpacity: 1 }} />
-            <stop offset="50%" style={{ stopColor: "#3b0764", stopOpacity: 1 }} />
-            <stop offset="100%" style={{ stopColor: "#831843", stopOpacity: 1 }} />
+          <linearGradient id="waveGradient" x1="0%" x2="100%" y1="0%" y2="0%">
+            <stop
+              offset="0%"
+              style={{ stopColor: "#1e3a8a", stopOpacity: 1 }}
+            />
+            <stop
+              offset="50%"
+              style={{ stopColor: "#3b0764", stopOpacity: 1 }}
+            />
+            <stop
+              offset="100%"
+              style={{ stopColor: "#831843", stopOpacity: 1 }}
+            />
           </linearGradient>
         </defs>
 
         {/* Multiple wave layers for depth */}
         {/* Wave 1 - Background */}
         <path
+          d="M0,160L48,165.3C96,171,192,181,288,181.3C384,181,480,171,576,154.7C672,139,768,117,864,122.7C960,128,1056,160,1152,165.3C1248,171,1344,149,1392,138.7L1440,128L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"
           fill="url(#waveGradient)"
           fillOpacity="0.3"
-          d="M0,160L48,165.3C96,171,192,181,288,181.3C384,181,480,171,576,154.7C672,139,768,117,864,122.7C960,128,1056,160,1152,165.3C1248,171,1344,149,1392,138.7L1440,128L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"
         >
           <animate
             attributeName="d"
@@ -38,9 +47,9 @@ export function FooterWave() {
 
         {/* Wave 2 - Middle */}
         <path
+          d="M0,224L48,213.3C96,203,192,181,288,181.3C384,181,480,203,576,213.3C672,224,768,224,864,208C960,192,1056,160,1152,149.3C1248,139,1344,149,1392,154.7L1440,160L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"
           fill="url(#waveGradient)"
           fillOpacity="0.5"
-          d="M0,224L48,213.3C96,203,192,181,288,181.3C384,181,480,203,576,213.3C672,224,768,224,864,208C960,192,1056,160,1152,149.3C1248,139,1344,149,1392,154.7L1440,160L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"
         >
           <animate
             attributeName="d"
@@ -55,9 +64,9 @@ export function FooterWave() {
 
         {/* Wave 3 - Foreground */}
         <path
+          d="M0,256L48,240C96,224,192,192,288,186.7C384,181,480,203,576,208C672,213,768,203,864,197.3C960,192,1056,192,1152,197.3C1248,203,1344,213,1392,218.7L1440,224L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"
           fill="url(#waveGradient)"
           fillOpacity="0.7"
-          d="M0,256L48,240C96,224,192,192,288,186.7C384,181,480,203,576,208C672,213,768,203,864,197.3C960,192,1056,192,1152,197.3C1248,203,1344,213,1392,218.7L1440,224L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"
         >
           <animate
             attributeName="d"

@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type {
+  AnalysisProgress,
+  AnalysisStage,
   AnalyzeAndTransferResponse,
-  DashboardData,
   BlueprintData,
+  DashboardData,
   EditInstructions,
   OutputInfo,
   PipelineTiming,
-  AnalysisStage,
-  AnalysisProgress,
 } from "@/lib/types/analysis";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ export interface UseAnalysisDashboardReturn {
   analyze: (
     reference: File,
     target: File,
-    opts?: AnalysisDashboardOptions,
+    opts?: AnalysisDashboardOptions
   ) => Promise<AnalyzeResult>;
   /** Reset all state back to idle */
   reset: () => void;
@@ -80,10 +80,13 @@ export function useAnalysisDashboard(): UseAnalysisDashboardReturn {
   const [progress, setProgress] = useState<AnalysisProgress>(INITIAL_PROGRESS);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [blueprint, setBlueprint] = useState<BlueprintData | null>(null);
-  const [instructions, setInstructions] = useState<EditInstructions | null>(null);
+  const [instructions, setInstructions] = useState<EditInstructions | null>(
+    null
+  );
   const [output, setOutput] = useState<OutputInfo | null>(null);
   const [timing, setTiming] = useState<PipelineTiming | null>(null);
-  const [rawResponse, setRawResponse] = useState<AnalyzeAndTransferResponse | null>(null);
+  const [rawResponse, setRawResponse] =
+    useState<AnalyzeAndTransferResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Prevent duplicate calls
@@ -92,16 +95,17 @@ export function useAnalysisDashboard(): UseAnalysisDashboardReturn {
   const tick = useCallback(
     (stage: AnalysisStage, percent: number, message: string) =>
       setProgress({ stage, percent, message }),
-    [],
+    []
   );
 
   const analyze = useCallback(
     async (
       reference: File,
       target: File,
-      opts: AnalysisDashboardOptions = {},
+      opts: AnalysisDashboardOptions = {}
     ): Promise<AnalyzeResult> => {
-      if (runningRef.current) return { data: null, error: "Analysis already in progress" };
+      if (runningRef.current)
+        return { data: null, error: "Analysis already in progress" };
       runningRef.current = true;
 
       // Reset previous results
@@ -141,7 +145,11 @@ export function useAnalysisDashboard(): UseAnalysisDashboardReturn {
         // No timeout logic; allow backend to handle job duration
 
         // ── Stage 2: Analyzing (with retry for transient failures) ───
-        tick("analyzing", 25, "Running shot detection, motion & audio analysis…");
+        tick(
+          "analyzing",
+          25,
+          "Running shot detection, motion & audio analysis…"
+        );
 
         let res: Response | null = null;
         let lastFetchErr: unknown = null;
@@ -168,7 +176,7 @@ export function useAnalysisDashboard(): UseAnalysisDashboardReturn {
             tick(
               "analyzing",
               25,
-              `Network hiccup — retrying in ${delay / 1000}s (attempt ${attempt + 2}/${MAX_RETRIES + 1})…`,
+              `Network hiccup — retrying in ${delay / 1000}s (attempt ${attempt + 2}/${MAX_RETRIES + 1})…`
             );
             await new Promise((r) => setTimeout(r, delay));
           }
@@ -184,7 +192,7 @@ export function useAnalysisDashboard(): UseAnalysisDashboardReturn {
               : "Unknown network error";
           throw new Error(
             `Could not reach the server after ${MAX_RETRIES + 1} attempts: ${netMsg}. ` +
-              "Check your internet connection and try again.",
+              "Check your internet connection and try again."
           );
         }
 
@@ -230,16 +238,24 @@ export function useAnalysisDashboard(): UseAnalysisDashboardReturn {
         }
         setRawResponse(body);
 
-        if (!body.success && !body.dashboard) {
+        if (!(body.success || body.dashboard)) {
           // Truly failed — no data at all
           throw new Error(body.error || "Pipeline returned success=false");
         }
 
         // ── Stage 3: Populate state ──────────────────────────────────
-        tick("complete", 100, body.success ? "Analysis complete!" : "Analysis complete — video render failed.");
+        tick(
+          "complete",
+          100,
+          body.success
+            ? "Analysis complete!"
+            : "Analysis complete — video render failed."
+        );
 
         // Return partial success: data is present, error notes render issue
-        const partialError = !body.success ? (body.output?.error || body.error || "Video render failed") : null;
+        const partialError = body.success
+          ? null
+          : body.output?.error || body.error || "Video render failed";
         return { data: body, error: partialError };
       } catch (err: unknown) {
         let msg: string;
@@ -259,7 +275,7 @@ export function useAnalysisDashboard(): UseAnalysisDashboardReturn {
         runningRef.current = false;
       }
     },
-    [tick],
+    [tick]
   );
 
   const reset = useCallback(() => {

@@ -1,12 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import {
-  AreaChart,
-  Area,
-  ResponsiveContainer,
-  YAxis,
-} from "recharts";
+import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sparkline — thin recharts wrapper for inline card visualisations
@@ -37,7 +32,7 @@ export function SparklineChart({
 }: SparklineChartProps) {
   const chartData = useMemo(
     () => data.map((value, index) => ({ index, value })),
-    [data],
+    [data]
   );
 
   if (chartData.length < 2) return null;
@@ -46,27 +41,27 @@ export function SparklineChart({
 
   return (
     <div className={className} style={{ width: "100%", height }}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer height="100%" width="100%">
         <AreaChart
           data={chartData}
           margin={{ top: 2, right: 2, bottom: 2, left: 2 }}
         >
           <defs>
-            <linearGradient id={gId} x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={gId} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor={color} stopOpacity={0.4} />
               <stop offset="100%" stopColor={color} stopOpacity={0.05} />
             </linearGradient>
           </defs>
           <YAxis domain={["dataMin", "dataMax"]} hide />
           <Area
-            type="monotone"
+            activeDot={false}
             dataKey="value"
-            stroke={color}
-            strokeWidth={1.5}
+            dot={false}
             fill={filled ? `url(#${gId})` : "none"}
             isAnimationActive={false}
-            dot={false}
-            activeDot={false}
+            stroke={color}
+            strokeWidth={1.5}
+            type="monotone"
           />
         </AreaChart>
       </ResponsiveContainer>

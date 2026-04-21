@@ -28,11 +28,11 @@
  */
 
 import * as fs from "node:fs";
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { analyzeAndTransferFull } from "../../../server/pipeline/orchestrator";
 import type {
-  BlueprintTransferOptions,
   AdaptationStrategy,
+  BlueprintTransferOptions,
 } from "../../../server/types";
 
 export const dynamic = "force-dynamic";
@@ -65,16 +65,19 @@ export async function POST(req: NextRequest) {
     const referenceFile = form.get("reference");
     const targetFile = form.get("target");
 
-    if (!referenceFile || !(referenceFile instanceof File) || referenceFile.size === 0) {
+    if (
+      !(referenceFile && referenceFile instanceof File) ||
+      referenceFile.size === 0
+    ) {
       return NextResponse.json(
         { success: false, error: 'Missing or empty "reference" video file.' },
-        { status: 400 },
+        { status: 400 }
       );
     }
-    if (!targetFile || !(targetFile instanceof File) || targetFile.size === 0) {
+    if (!(targetFile && targetFile instanceof File) || targetFile.size === 0) {
       return NextResponse.json(
         { success: false, error: 'Missing or empty "target" video file.' },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -102,21 +105,16 @@ export async function POST(req: NextRequest) {
       transferOpts.includeStyle = includeStyleRaw !== "false";
     }
 
-    const outputModeRaw = form.get("outputMode");
-    const outputMode: OutputMode =
-      typeof outputModeRaw === "string" &&
-      VALID_OUTPUT_MODES.has(outputModeRaw as OutputMode)
-        ? (outputModeRaw as OutputMode)
-        : "json";
+    const outputMode: OutputMode = "both";
 
     // Render options: keep file on disk for "video" / "both" modes
-    const keepOutput = outputMode === "video" || outputMode === "both";
+    const keepOutput = true;
 
     console.log(
       `[analyze-and-transfer] ref=${fmtMB(referenceBuffer.length)} ` +
         `tgt=${fmtMB(targetBuffer.length)} ` +
         `strategy=${transferOpts.strategy ?? "proportional"} ` +
-        `output=${outputMode}`,
+        `output=${outputMode}`
     );
 
     // ── Run the full pipeline ────────────────────────────────────────
@@ -125,38 +123,13 @@ export async function POST(req: NextRequest) {
         referenceBuffer,
         targetBuffer,
         transferOpts,
-        { keepOutput },
+        { keepOutput }
       );
 
     const totalMs = Math.round(performance.now() - t0);
 
-    // ── Output: raw video binary ─────────────────────────────────────
-    if (outputMode === "video") {
-      if (!transfer.success || !transfer.outputPath) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: transfer.error || "Render failed — no output file produced.",
-          },
-          { status: 500 },
-        );
-      }
-
-      const outputBuffer = await fs.promises.readFile(transfer.outputPath);
-      try { fs.unlinkSync(transfer.outputPath); } catch { /* ignore */ }
-
-      return new NextResponse(outputBuffer, {
-        status: 200,
-        headers: {
-          "Content-Type": "video/mp4",
-          "Content-Length": String(outputBuffer.length),
-          "Content-Disposition": `attachment; filename="transfer-${Date.now()}.mp4"`,
-          "X-Processing-Ms": String(totalMs),
-          "X-Blueprint-Id": blueprint.blueprintId,
-          "X-Instruction-Id": instructions.instructionId,
-        },
-      });
-    }
+    // Skip video-only mode, always return JSON + videoUrl (for exhibition demo)
+    // Video stays in public/outputs/ for reliable download/preview
 
     // ── Output: JSON (optionally with embedded base64 video) ─────────
     let videoBase64: string | undefined;
@@ -173,7 +146,9 @@ export async function POST(req: NextRequest) {
       try {
         const stat = await fs.promises.stat(transfer.outputPath);
         videoSizeBytes = stat.size;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       // Do NOT delete the file — browser needs to fetch it via videoUrl
     } else if (transfer.videoBase64) {
       videoBase64 = transfer.videoBase64;
@@ -238,7 +213,7 @@ export async function POST(req: NextRequest) {
     console.error("[analyze-and-transfer] Pipeline error:", message);
     return NextResponse.json(
       { success: false, error: message },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -256,7 +231,7 @@ function fmtMB(bytes: number): string {
  * to show a breakdown of where time was spent.
  */
 function sumProcessingMs(
-  raw: import("../../../server/types").FullVideoMetadata,
+  raw: import("../../../server/types").FullVideoMetadata
 ): number {
   return (
     raw.shotDetection.processingMs +

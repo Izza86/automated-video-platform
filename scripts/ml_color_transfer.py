@@ -505,8 +505,20 @@ def empty_result():
 
 
 def main():
+    import time as _time
+    _t0 = _time.time()
+    stages_log = []
+
+    def _emit(result, warnings=None):
+        result["_pipelineOk"] = "error" not in result or result.get("frameCount", 0) > 0
+        result["_stages"] = stages_log
+        result["_processingMs"] = round((_time.time() - _t0) * 1000)
+        if warnings:
+            result["_warnings"] = warnings
+        print(json_dumps(result))
+
     if len(sys.argv) < 2:
-        print(json_dumps({"error": "Usage: ml_color_transfer.py <video_path>", **empty_result()}))
+        _emit({"error": "Usage: ml_color_transfer.py <video_path>", **empty_result()})
         return
 
     video_path = sys.argv[1]
@@ -515,7 +527,7 @@ def main():
         video_path = video_path[1:-1]
 
     if not os.path.isfile(video_path):
-        print(json_dumps({"error": f"File not found: {video_path}", **empty_result()}))
+        _emit({"error": f"File not found: {video_path}", **empty_result()})
         return
 
     n_frames = 10
@@ -532,13 +544,17 @@ def main():
         if idx + 1 < len(sys.argv):
             lut_output = sys.argv[idx + 1]
 
+    warnings = []
     try:
+        st = _time.time()
         result = analyze_color_ml(video_path, n_frames=n_frames, lut_output=lut_output)
-        print(json_dumps(result))
+        stages_log.append({"name": "color-analysis", "ok": True, "model": result.get("mlModel", "unknown"), "ms": round((_time.time() - st) * 1000)})
+        _emit(result, warnings if warnings else None)
     except Exception as e:
         import traceback
         traceback.print_exc(file=sys.stderr)
-        print(json_dumps({"error": str(e), **empty_result()}))
+        stages_log.append({"name": "color-analysis", "ok": False, "error": str(e)})
+        _emit({"error": str(e), **empty_result()}, warnings if warnings else None)
 
 
 if __name__ == "__main__":

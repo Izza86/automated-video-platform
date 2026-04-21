@@ -73,7 +73,7 @@ export interface FilterGraphOptions {
 export async function generateFilterGraph(
   adapted: AdaptedStyleDNA,
   tmp: string,
-  opts: FilterGraphOptions,
+  opts: FilterGraphOptions
 ): Promise<FilterGraphOutput> {
   const vf: string[] = [];
   const filterLog: string[] = [];
@@ -101,7 +101,13 @@ export async function generateFilterGraph(
   } else {
     const zoomTimeline = adapted.source.motion.zoomTimeline;
     if (zoomTimeline.length >= 2) {
-      const zoomExpr = buildKeyframeZoomExpr(zoomTimeline, targetDuration, opts.refDuration, w, h);
+      const zoomExpr = buildKeyframeZoomExpr(
+        zoomTimeline,
+        targetDuration,
+        opts.refDuration,
+        w,
+        h
+      );
       if (zoomExpr) {
         vf.push(zoomExpr);
         filterLog.push(`zoom:keyframe(${zoomTimeline.length}pts)`);
@@ -131,36 +137,29 @@ export async function generateFilterGraph(
 
     const ref = useColab ? "__IMPACTCMD_PATH__" : fwdPath(impactPath);
     vf.push(`sendcmd=f='${ref}'`);
-    vf.push(`rotate@impact_rotate=angle=0:ow=iw:oh=ih`);
-    vf.push(`scale@impact_scale=w=iw:h=ih`);
-    filterLog.push(`impact-jitter:${adapted.motion.jitterEvents.length}beats(semantic)`);
+    vf.push("rotate@impact_rotate=angle=0:ow=iw:oh=ih");
+    vf.push("scale@impact_scale=w=iw:h=ih");
+    filterLog.push(
+      `impact-jitter:${adapted.motion.jitterEvents.length}beats(semantic)`
+    );
 
     console.log(
       `[filter-graph] Beat jitter: ${adapted.motion.jitterEvents.length} semantic events ` +
-        `(at target's ${adapted.motion.jitterEvents.length} hardest beats)`,
+        `(at target's ${adapted.motion.jitterEvents.length} hardest beats)`
     );
   } else {
     filterLog.push("impact-jitter:skipped(no-hard-beats)");
   }
 
-  // ── 2c. Motion Sync — setpts ────────────────────────────────────────
-  // Use the semantic setpts from the adapter (target's own velocity profile
-  // scaled by reference energy).  Fall back to reference timeline if needed.
-  const setptsExpr =
-    adapted.motion.setptsExpr ??
-    buildFallbackSetpts(opts.refVelocityTimeline, targetDuration, opts.refDuration);
-
-  if (setptsExpr) {
-    vf.push(`setpts='${setptsExpr}'`);
-    filterLog.push(
-      adapted.motion.setptsExpr
-        ? `velocity:semantic(target-own-profile)`
-        : `velocity:keyframe-ref-fallback(${opts.refVelocityTimeline.length}pts)`,
+  // ── 2c. Motion Sync — setpts (STRICT) ───────────────────────────────
+  const setptsExpr = adapted.motion.setptsExpr;
+  if (!setptsExpr) {
+    throw new Error(
+      "[STRICT FAILURE] Missing semantic setpts expression. Motion fallback is disabled."
     );
-  } else {
-    vf.push("setpts=PTS-STARTPTS");
-    filterLog.push("setpts:passthrough(no-velocity-data)");
   }
+  vf.push(`setpts='${setptsExpr}'`);
+  filterLog.push("velocity:semantic(target-own-profile)");
 
   // ── 3. Color Transfer ───────────────────────────────────────────────
 
@@ -170,12 +169,9 @@ export async function generateFilterGraph(
     filterLog.push("histogram-match:cdf-curves(semantic,32pt)");
     console.log("[filter-graph] CDF curves applied (32-point, master+r+g+b)");
   } else if (!adapted.color.applyHald) {
-    // No CDF and no HALD → fallback colorbalance / channelmixer
-    for (const f of adapted.color.fallbackColorFilters) {
-      vf.push(f);
-    }
-    filterLog.push("color-match:colorbalance-fallback");
-    console.warn("[filter-graph] ⚠ No CDF/HALD — using colorbalance fallback");
+    throw new Error(
+      "[STRICT FAILURE] Missing CDF/HALD color transform. Color fallback is disabled."
+    );
   }
 
   // 3b. Temporal color + flicker
@@ -183,26 +179,40 @@ export async function generateFilterGraph(
   const exposureEvents = adapted.lighting.exposureEvents;
   const moodSegments = adapted.color.moodGradeSegments;
 
-  if (temporalSendcmd.length >= 2 || exposureEvents.length > 0 || moodSegments.length > 0) {
+  if (
+    temporalSendcmd.length >= 2 ||
+    exposureEvents.length > 0 ||
+    moodSegments.length > 0
+  ) {
     const cmdLines: string[] = [];
 
     // Segment-wise mood adaptation (prompt 6)
     for (const seg of moodSegments) {
       const t = seg.start.toFixed(3);
-      cmdLines.push(`${t} temporal_eq brightness ${seg.brightness.toFixed(5)};`);
+      cmdLines.push(
+        `${t} temporal_eq brightness ${seg.brightness.toFixed(5)};`
+      );
       cmdLines.push(`${t} temporal_eq contrast ${seg.contrast.toFixed(5)};`);
-      cmdLines.push(`${t} temporal_eq saturation ${seg.saturation.toFixed(5)};`);
+      cmdLines.push(
+        `${t} temporal_eq saturation ${seg.saturation.toFixed(5)};`
+      );
     }
 
     for (const entry of temporalSendcmd) {
       const t = entry.time.toFixed(3);
-      cmdLines.push(`${t} temporal_eq contrast ${entry.contrastRatio.toFixed(6)};`);
-      cmdLines.push(`${t} temporal_eq saturation ${entry.saturationRatio.toFixed(6)};`);
+      cmdLines.push(
+        `${t} temporal_eq contrast ${entry.contrastRatio.toFixed(6)};`
+      );
+      cmdLines.push(
+        `${t} temporal_eq saturation ${entry.saturationRatio.toFixed(6)};`
+      );
     }
 
     // Organic exposure curve (prompt 4)
     for (const e of exposureEvents) {
-      cmdLines.push(`${e.time.toFixed(3)} temporal_eq brightness ${e.brightness.toFixed(5)};`);
+      cmdLines.push(
+        `${e.time.toFixed(3)} temporal_eq brightness ${e.brightness.toFixed(5)};`
+      );
     }
 
     const sendcmdPath = path.join(tmp, "temporal_color.cmd");
@@ -214,11 +224,11 @@ export async function generateFilterGraph(
     vf.push("eq@temporal_eq=brightness=0:contrast=1:saturation=1");
 
     filterLog.push(
-      `temporal-color:${temporalSendcmd.length}events+mood:${moodSegments.length}+exposure:${exposureEvents.length}`,
+      `temporal-color:${temporalSendcmd.length}events+mood:${moodSegments.length}+exposure:${exposureEvents.length}`
     );
     console.log(
       `[filter-graph] Temporal color: ${temporalSendcmd.length} semantic events ` +
-        `(energy-level matched, not proportional)`,
+        "(energy-level matched, not proportional)"
     );
   } else {
     vf.push("eq@temporal_eq=brightness=0:contrast=1:saturation=1");
@@ -235,7 +245,9 @@ export async function generateFilterGraph(
       blurLines.push(`${t} ref_blur luma_power 2;`);
     }
     // Reset at video end
-    blurLines.push(`${Math.max(0, targetDuration - 0.05).toFixed(3)} ref_blur luma_radius 0;`);
+    blurLines.push(
+      `${Math.max(0, targetDuration - 0.05).toFixed(3)} ref_blur luma_radius 0;`
+    );
 
     const blurPath = path.join(tmp, "ref_blur.cmd");
     fs.writeFileSync(blurPath, blurLines.join("\n") + "\n", "utf-8");
@@ -243,12 +255,12 @@ export async function generateFilterGraph(
 
     const ref = useColab ? "__BLURCMD_PATH__" : fwdPath(blurPath);
     vf.push(`sendcmd=f='${ref}'`);
-    vf.push(`boxblur@ref_blur=luma_radius=0:luma_power=2`);
+    vf.push("boxblur@ref_blur=luma_radius=0:luma_power=2");
     filterLog.push(`ref-blur:${blurEvents.length}events(semantic,motion-peak)`);
 
     console.log(
       `[filter-graph] Blur: ${blurEvents.length} events at target motion peaks ` +
-        `(semantic, not proportional)`,
+        "(semantic, not proportional)"
     );
   }
 
@@ -265,15 +277,21 @@ export async function generateFilterGraph(
 
       switch (gt.subtype) {
         case "flash_transition": {
-          const flash = parseFloat((0.25 + (gt.tdScore - 0.5) * 0.9).toFixed(3));
+          const flash = Number.parseFloat(
+            (0.25 + (gt.tdScore - 0.5) * 0.9).toFixed(3)
+          );
           transLines.push(`${tBefore} ref_transition brightness 0;`);
           transLines.push(`${tAt} ref_transition brightness ${flash};`);
           transLines.push(`${tAfter} ref_transition brightness 0;`);
           break;
         }
         case "dissolve": {
-          const bright = parseFloat((-0.08 - (gt.histScore - 0.3) * 0.34).toFixed(3));
-          const cont = parseFloat((0.92 - (gt.histScore - 0.3) * 0.34).toFixed(3));
+          const bright = Number.parseFloat(
+            (-0.08 - (gt.histScore - 0.3) * 0.34).toFixed(3)
+          );
+          const cont = Number.parseFloat(
+            (0.92 - (gt.histScore - 0.3) * 0.34).toFixed(3)
+          );
           transLines.push(`${tBefore} ref_transition brightness 0;`);
           transLines.push(`${tAt} ref_transition brightness ${bright};`);
           transLines.push(`${tAfter} ref_transition brightness 0;`);
@@ -283,14 +301,18 @@ export async function generateFilterGraph(
           break;
         }
         case "fade": {
-          const depth = parseFloat((-0.15 - (gt.histScore - 0.1) * 0.8).toFixed(3));
+          const depth = Number.parseFloat(
+            (-0.15 - (gt.histScore - 0.1) * 0.8).toFixed(3)
+          );
           transLines.push(`${tBefore} ref_transition brightness 0;`);
           transLines.push(`${tAt} ref_transition brightness ${depth};`);
           transLines.push(`${tAfter} ref_transition brightness 0;`);
           break;
         }
         case "blur_transition": {
-          const dip = parseFloat((-0.03 - gt.histScore * 0.12).toFixed(3));
+          const dip = Number.parseFloat(
+            (-0.03 - gt.histScore * 0.12).toFixed(3)
+          );
           transLines.push(`${tBefore} ref_transition brightness 0;`);
           transLines.push(`${tAt} ref_transition brightness ${dip};`);
           transLines.push(`${tAfter} ref_transition brightness 0;`);
@@ -308,9 +330,9 @@ export async function generateFilterGraph(
 
       const ref = useColab ? "__TRANSCMD_PATH__" : fwdPath(transPath);
       vf.push(`sendcmd=f='${ref}'`);
-      vf.push(`eq@ref_transition=brightness=0:contrast=1`);
+      vf.push("eq@ref_transition=brightness=0:contrast=1");
       filterLog.push(
-        `ref-transition:${gradualTransitions.length}(${gradualTransitions.map((g) => g.subtype).join(",")})`,
+        `ref-transition:${gradualTransitions.length}(${gradualTransitions.map((g) => g.subtype).join(",")})`
       );
     }
   }
@@ -322,7 +344,9 @@ export async function generateFilterGraph(
 
   // ── 4. Sharpness ────────────────────────────────────────────────────
   vf.push(adapted.texture.sharpnessFilter);
-  filterLog.push(`unsharp:${adapted.source.texture.sharpnessProfile.toFixed(1)}`);
+  filterLog.push(
+    `unsharp:${adapted.source.texture.sharpnessProfile.toFixed(1)}`
+  );
 
   // ── 4b. Film Grain ──────────────────────────────────────────────────
   if (adapted.texture.grainFilter) {
@@ -333,7 +357,9 @@ export async function generateFilterGraph(
   // ── 4c. Halation ────────────────────────────────────────────────────
   if (adapted.lighting.halationFilter) {
     vf.push(adapted.lighting.halationFilter);
-    filterLog.push(`halation:${adapted.source.lighting.halationIntensity.toFixed(2)}`);
+    filterLog.push(
+      `halation:${adapted.source.lighting.halationIntensity.toFixed(2)}`
+    );
   }
 
   // ── 5. Vignette ─────────────────────────────────────────────────────
@@ -348,15 +374,25 @@ export async function generateFilterGraph(
     for (const evt of adapted.rhythm.beatResponseEvents) {
       const t = evt.time.toFixed(3);
       const tEnd = evt.endTime.toFixed(3);
-      responseLines.push(`${t} beat_response brightness ${evt.brightness.toFixed(4)};`);
-      responseLines.push(`${t} beat_response contrast ${evt.contrast.toFixed(4)};`);
+      responseLines.push(
+        `${t} beat_response brightness ${evt.brightness.toFixed(4)};`
+      );
+      responseLines.push(
+        `${t} beat_response contrast ${evt.contrast.toFixed(4)};`
+      );
       if (evt.rotation !== 0) {
-        responseLines.push(`${t} beat_response_rot angle ${evt.rotation.toFixed(5)};`);
+        responseLines.push(
+          `${t} beat_response_rot angle ${evt.rotation.toFixed(5)};`
+        );
         responseLines.push(`${tEnd} beat_response_rot angle 0;`);
       }
       if (evt.zoom !== 1) {
-        responseLines.push(`${t} beat_response_scale w iw*${evt.zoom.toFixed(4)};`);
-        responseLines.push(`${t} beat_response_scale h ih*${evt.zoom.toFixed(4)};`);
+        responseLines.push(
+          `${t} beat_response_scale w iw*${evt.zoom.toFixed(4)};`
+        );
+        responseLines.push(
+          `${t} beat_response_scale h ih*${evt.zoom.toFixed(4)};`
+        );
         responseLines.push(`${tEnd} beat_response_scale w iw;`);
         responseLines.push(`${tEnd} beat_response_scale h ih;`);
       }
@@ -373,13 +409,17 @@ export async function generateFilterGraph(
     vf.push("eq@beat_response=brightness=0:contrast=1");
     vf.push("rotate@beat_response_rot=angle=0:ow=iw:oh=ih");
     vf.push("scale@beat_response_scale=w=iw:h=ih");
-    filterLog.push(`beat-response:${adapted.rhythm.beatResponseEvents.length}content-aware`);
+    filterLog.push(
+      `beat-response:${adapted.rhythm.beatResponseEvents.length}content-aware`
+    );
   } else if (adapted.rhythm.beatPulseEvents.length > 0) {
     const pulseLines: string[] = [];
     for (const evt of adapted.rhythm.beatPulseEvents) {
       const t = evt.time.toFixed(3);
       const tEnd = evt.endTime.toFixed(3);
-      pulseLines.push(`${t} beat_pulse brightness ${evt.brightness.toFixed(3)};`);
+      pulseLines.push(
+        `${t} beat_pulse brightness ${evt.brightness.toFixed(3)};`
+      );
       pulseLines.push(`${t} beat_pulse contrast ${evt.contrast.toFixed(3)};`);
       pulseLines.push(`${tEnd} beat_pulse brightness 0;`);
       pulseLines.push(`${tEnd} beat_pulse contrast 1;`);
@@ -390,32 +430,46 @@ export async function generateFilterGraph(
 
     const ref = useColab ? "__BEATPULSE_PATH__" : fwdPath(pulsePath);
     vf.push(`sendcmd=f='${ref}'`);
-    vf.push(`eq@beat_pulse=brightness=0:contrast=1`);
-    filterLog.push(`beat-pulse:${adapted.rhythm.beatPulseEvents.length}beats(semantic)`);
+    vf.push("eq@beat_pulse=brightness=0:contrast=1");
+    filterLog.push(
+      `beat-pulse:${adapted.rhythm.beatPulseEvents.length}beats(semantic)`
+    );
 
     console.log(
       `[filter-graph] Beat pulse: ${adapted.rhythm.beatPulseEvents.length} events ` +
         `(target's own beat grid, intensity range ` +
-        `${adapted.rhythm.beatPulseEvents.reduce((m, e) => Math.min(m, e.brightness), Infinity).toFixed(2)}-` +
-        `${adapted.rhythm.beatPulseEvents.reduce((m, e) => Math.max(m, e.brightness), 0).toFixed(2)})`,
+        `${adapted.rhythm.beatPulseEvents.reduce((m, e) => Math.min(m, e.brightness), Number.POSITIVE_INFINITY).toFixed(2)}-` +
+        `${adapted.rhythm.beatPulseEvents.reduce((m, e) => Math.max(m, e.brightness), 0).toFixed(2)})`
     );
   }
 
   // ── 7. FPS normalisation + minimal fades ────────────────────────────
   vf.push("fps=30");
   vf.push("fade=t=in:st=0:d=0.08");
-  vf.push(`fade=t=out:st=${Math.max(0, targetDuration - 0.3).toFixed(2)}:d=0.3`);
+  vf.push(
+    `fade=t=out:st=${Math.max(0, targetDuration - 0.3).toFixed(2)}:d=0.3`
+  );
   filterLog.push("fps:30", "fades:0.08in+0.3out");
 
   // ── Assemble final filter chain string ──────────────────────────────
   const videoFilterChain = vf.join(",");
 
   console.log("[filter-graph] StyleDNA pipeline summary:");
-  console.log(`  [1] Pacing: ${adapted.pacing.cutTimestamps.length} semantic cuts`);
-  console.log(`  [2] Motion: ${adapted.motion.jitterEvents.length} jitter events`);
-  console.log(`  [3] Color: ${temporalSendcmd.length} semantic temporal events`);
-  console.log(`  [4] Lighting: exposureEvents=${adapted.lighting.exposureEvents.length}`);
-  console.log(`  [5] Rhythm: responses=${adapted.rhythm.beatResponseEvents.length}`);
+  console.log(
+    `  [1] Pacing: ${adapted.pacing.cutTimestamps.length} semantic cuts`
+  );
+  console.log(
+    `  [2] Motion: ${adapted.motion.jitterEvents.length} jitter events`
+  );
+  console.log(
+    `  [3] Color: ${temporalSendcmd.length} semantic temporal events`
+  );
+  console.log(
+    `  [4] Lighting: exposureEvents=${adapted.lighting.exposureEvents.length}`
+  );
+  console.log(
+    `  [5] Rhythm: responses=${adapted.rhythm.beatResponseEvents.length}`
+  );
   console.log(`  [6] Texture: ${blurEvents.length} blur events`);
 
   return {
@@ -448,14 +502,17 @@ function buildKeyframeZoomExpr(
   targetDuration: number,
   refDuration: number,
   w: number,
-  h: number,
+  h: number
 ): string | null {
   if (zoomTimeline.length < 2) return null;
 
   const MAX_ITER = 50;
   const ZOOM_SCALE = 0.0008; // RAFT optical-flow units → zoompan z-units
 
-  const refEnd = Math.max(refDuration, zoomTimeline[zoomTimeline.length - 1].time_sec + 0.01);
+  const refEnd = Math.max(
+    refDuration,
+    zoomTimeline[zoomTimeline.length - 1].time_sec + 0.01
+  );
   const scale = targetDuration / refEnd;
 
   interface ZoomKF {
@@ -501,7 +558,7 @@ function buildKeyframeZoomExpr(
 function buildFallbackSetpts(
   timeline: Array<{ time_sec: number; relative_speed: number }>,
   targetDuration: number,
-  refDuration: number,
+  refDuration: number
 ): string | null {
   if (!timeline || timeline.length < 2) return null;
 
@@ -509,7 +566,10 @@ function buildFallbackSetpts(
   const MIN_SPEED = 0.25;
   const MAX_SPEED = 4.0;
 
-  const refEnd = Math.max(refDuration, timeline[timeline.length - 1].time_sec + 0.01);
+  const refEnd = Math.max(
+    refDuration,
+    timeline[timeline.length - 1].time_sec + 0.01
+  );
   const scale = targetDuration / refEnd;
 
   interface Seg {
@@ -523,7 +583,10 @@ function buildFallbackSetpts(
   let outCursor = 0;
 
   for (let i = 0; i < timeline.length - 1; i++) {
-    const speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, timeline[i].relative_speed || 1.0));
+    const speed = Math.max(
+      MIN_SPEED,
+      Math.min(MAX_SPEED, timeline[i].relative_speed || 1.0)
+    );
     const inStart = timeline[i].time_sec * scale;
     const inEnd = timeline[i + 1].time_sec * scale;
     const inDuration = inEnd - inStart;
@@ -541,8 +604,14 @@ function buildFallbackSetpts(
     let cursor = 0;
     for (let i = 0; i < segs.length; i += step) {
       const s = segs[i];
-      const end = i + step < segs.length ? segs[i + step].inStart : targetDuration;
-      decimated.push({ inStart: s.inStart, inEnd: end, speed: s.speed, outStart: cursor });
+      const end =
+        i + step < segs.length ? segs[i + step].inStart : targetDuration;
+      decimated.push({
+        inStart: s.inStart,
+        inEnd: end,
+        speed: s.speed,
+        outStart: cursor,
+      });
       cursor += (end - s.inStart) / s.speed;
     }
     segs = decimated;

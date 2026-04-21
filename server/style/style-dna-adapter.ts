@@ -59,9 +59,9 @@
 
 import type { BeatEvent, TemporalColorSample } from "../types";
 import type {
+  AdaptedStyleDNA,
   StyleDNA,
   TargetContentContext,
-  AdaptedStyleDNA,
 } from "../types/style-dna";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ import type {
  */
 export function adaptToTargetContent(
   dna: StyleDNA,
-  ctx: TargetContentContext,
+  ctx: TargetContentContext
 ): AdaptedStyleDNA {
   return {
     source: dna,
@@ -99,7 +99,7 @@ export function adaptToTargetContent(
 
 function adaptPacing(
   dna: StyleDNA,
-  ctx: TargetContentContext,
+  ctx: TargetContentContext
 ): AdaptedStyleDNA["pacing"] {
   const { duration } = ctx;
   const { pacing } = dna;
@@ -163,7 +163,7 @@ function adaptPacing(
           const dist = Math.abs(s.timestamp_sec - proportionalTime);
           return dist < best.dist ? { time: s.timestamp_sec, dist } : best;
         },
-        { time: proportionalTime, dist: Infinity },
+        { time: proportionalTime, dist: Number.POSITIVE_INFINITY }
       );
 
     return {
@@ -184,7 +184,7 @@ function adaptPacing(
 
 function adaptMotion(
   dna: StyleDNA,
-  ctx: TargetContentContext,
+  ctx: TargetContentContext
 ): AdaptedStyleDNA["motion"] {
   const { duration } = ctx;
   const { motion, rhythm } = dna;
@@ -200,8 +200,15 @@ function adaptMotion(
     const targetEnergy = ctx.motionData.motionIntensity;
     // energyRatio: how much MORE dynamic the ref is vs the target
     // clamped to avoid extreme scaling (0.1× – 3×)
-    const energyRatio = Math.max(0.1, Math.min(3.0, targetEnergy > 0 ? refEnergy / targetEnergy : 1.0));
+    const energyRatio = Math.max(
+      0.1,
+      Math.min(3.0, targetEnergy > 0 ? refEnergy / targetEnergy : 1.0)
+    );
     setptsExpr = buildSemanticSetpts(targetVtl, duration, energyRatio);
+  } else {
+    throw new Error(
+      "[STRICT FAILURE] Missing target velocity timeline for semantic setpts."
+    );
   }
   // If target has no velocity timeline, setptsExpr=null → generator
   // falls back to the reference velocity timeline (proportional).
@@ -212,7 +219,9 @@ function adaptMotion(
   const K = refHardBeats.length;
 
   // Sort ref jitter beats by intensity (strongest first) for rank-matching
-  const sortedRefBeats = [...refHardBeats].sort((a, b) => b.intensity - a.intensity);
+  const sortedRefBeats = [...refHardBeats].sort(
+    (a, b) => b.intensity - a.intensity
+  );
 
   // Find the K hardest beats in the target timeline
   const sortedTargetBeats = [...ctx.beatEvents]
@@ -236,11 +245,22 @@ function adaptMotion(
     .filter((e) => e.time >= 0 && e.time < duration - 0.05)
     .sort((a, b) => a.time - b.time);
 
+  const panEvents = (ctx.motionData.motionTimeline ?? [])
+    .map((sample) => ({
+      time: sample.time_sec,
+      x: sample.camera.panX,
+      y: sample.camera.panY,
+      magnitude: sample.camera.magnitude ?? sample.meanMagnitude,
+    }))
+    .filter((e) => e.time >= 0 && e.time < duration - 0.01)
+    .sort((a, b) => a.time - b.time);
+
   return {
     setptsExpr,
     // Prompt 5: depth-aware zoom direction / parallax pan
     zoomExpr: buildDepthAwareZoomExpr(dna, ctx),
     jitterEvents,
+    panEvents,
   };
 }
 
@@ -250,22 +270,23 @@ function adaptMotion(
 
 function adaptColor(
   dna: StyleDNA,
-  ctx: TargetContentContext,
+  ctx: TargetContentContext
 ): AdaptedStyleDNA["color"] {
   const { color } = dna;
 
   const moodGradeSegments = buildTargetMoodSegments(
     color.moodSegments,
     ctx.duration,
-    dna.sourceDuration,
+    dna.sourceDuration
   );
 
   // ── CDF curves: timeless histogram transform ─────────────────────────
-  const curvesFilter = moodGradeSegments.length > 0
-    ? null
-    : color.histogramCdf
-    ? buildCDFCurvesFilter(color.histogramCdf)
-    : null;
+  const curvesFilter =
+    moodGradeSegments.length > 0
+      ? null
+      : color.histogramCdf
+        ? buildCDFCurvesFilter(color.histogramCdf)
+        : null;
 
   // ── Temporal sendcmd: SEMANTIC energy-level matching ─────────────────
   // High-energy reference samples → target's high-energy beat regions.
@@ -274,8 +295,7 @@ function adaptColor(
   const temporalSendcmd = buildSemanticTemporalSendcmd(
     color.temporalColorEvolution,
     ctx.beatEvents,
-    ctx.duration,
-    dna.sourceDuration,
+    ctx.duration
   );
 
   // HALD: applied whenever we have CDF data for deep colour matching
@@ -284,20 +304,31 @@ function adaptColor(
   // Fallback filters (used when CDF + HALD are both absent)
   const fallbackColorFilters: string[] = [];
   if (color.colorchannelmixerParams) {
-    fallbackColorFilters.push(`colorchannelmixer=${color.colorchannelmixerParams}`);
+    fallbackColorFilters.push(
+      `colorchannelmixer=${color.colorchannelmixerParams}`
+    );
   }
   if (color.colorbalanceParams) {
     fallbackColorFilters.push(`colorbalance=${color.colorbalanceParams}`);
   }
 
-  return { curvesFilter, temporalSendcmd, applyHald, fallbackColorFilters, moodGradeSegments };
+  return {
+    curvesFilter,
+    temporalSendcmd,
+    applyHald,
+    fallbackColorFilters,
+    moodGradeSegments,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lighting Adaptation
 // ─────────────────────────────────────────────────────────────────────────────
 
-function adaptLighting(dna: StyleDNA, ctx: TargetContentContext): AdaptedStyleDNA["lighting"] {
+function adaptLighting(
+  dna: StyleDNA,
+  ctx: TargetContentContext
+): AdaptedStyleDNA["lighting"] {
   const { lighting } = dna;
 
   // ── Flicker: content-independent sin() expression ───────────────────
@@ -310,7 +341,8 @@ function adaptLighting(dna: StyleDNA, ctx: TargetContentContext): AdaptedStyleDN
 
   const exposureEvents = lighting.exposureCurvePoints
     .map((p, i) => {
-      const t = (p.refTime / Math.max(dna.sourceDuration, 0.001)) * ctx.duration;
+      const t =
+        (p.refTime / Math.max(dna.sourceDuration, 0.001)) * ctx.duration;
       const drift = (Math.sin((i + 1) * 2.17) + Math.cos((i + 1) * 1.13)) * 0.5;
       const jitter = drift * lighting.stochasticJitter;
       const base = p.brightness - 0.5;
@@ -334,7 +366,10 @@ function adaptLighting(dna: StyleDNA, ctx: TargetContentContext): AdaptedStyleDN
   // ── Vignette: content-independent frame darkening ────────────────────
   let vignetteAngle: number | null = null;
   if (lighting.vignetteStrength > 0) {
-    vignetteAngle = Math.max(0.01, (Math.PI / 2) * (1 - lighting.vignetteStrength));
+    vignetteAngle = Math.max(
+      0.01,
+      (Math.PI / 2) * (1 - lighting.vignetteStrength)
+    );
   }
 
   return { flickerExpr, exposureEvents, halationFilter, vignetteAngle };
@@ -346,7 +381,7 @@ function adaptLighting(dna: StyleDNA, ctx: TargetContentContext): AdaptedStyleDN
 
 function adaptRhythm(
   dna: StyleDNA,
-  ctx: TargetContentContext,
+  ctx: TargetContentContext
 ): AdaptedStyleDNA["rhythm"] {
   const { duration } = ctx;
   const { rhythm } = dna;
@@ -358,14 +393,22 @@ function adaptRhythm(
   // but apply it to the target's actual beat positions.
   const beatPulseEvents: AdaptedStyleDNA["rhythm"]["beatPulseEvents"] = [];
 
-  const sortedTargetBeatsByIntensity = [...ctx.beatEvents].sort((a, b) => b.intensity - a.intensity);
+  const sortedTargetBeatsByIntensity = [...ctx.beatEvents].sort(
+    (a, b) => b.intensity - a.intensity
+  );
   const classified = rhythm.classifiedBeats ?? [];
   const beatResponseEvents = classified
     .map((c, i) => {
-      const tBeat = sortedTargetBeatsByIntensity[i % Math.max(1, sortedTargetBeatsByIntensity.length)];
+      const tBeat =
+        sortedTargetBeatsByIntensity[
+          i % Math.max(1, sortedTargetBeatsByIntensity.length)
+        ];
       if (!tBeat) return null;
       const t = tBeat.timestamp_sec;
-      const endTime = Math.min(duration, t + (c.class === "drop_moment" ? 0.14 : 0.08));
+      const endTime = Math.min(
+        duration,
+        t + (c.class === "drop_moment" ? 0.14 : 0.08)
+      );
 
       if (c.class === "hard_kick") {
         return {
@@ -425,13 +468,20 @@ function adaptRhythm(
   // Instead of mapping by proportional time ("ref drop at 4.2 s → target 6.1 s"),
   // we ask "what are the K most energetic moments in the TARGET?"
   const K = rhythm.dropZones.length;
-  const sortedRefDrops = [...rhythm.dropZones].sort((a, b) => b.intensity - a.intensity);
-  const sortedTargetBeats = [...ctx.beatEvents].sort((a, b) => b.intensity - a.intensity);
+  const sortedRefDrops = [...rhythm.dropZones].sort(
+    (a, b) => b.intensity - a.intensity
+  );
+  const sortedTargetBeats = [...ctx.beatEvents].sort(
+    (a, b) => b.intensity - a.intensity
+  );
 
-  const dropZoneEvents = sortedTargetBeats.slice(0, K).map((beat, i) => ({
-    time: beat.timestamp_sec,
-    intensity: sortedRefDrops[i]?.intensity ?? beat.intensity,
-  })).sort((a, b) => a.time - b.time);
+  const dropZoneEvents = sortedTargetBeats
+    .slice(0, K)
+    .map((beat, i) => ({
+      time: beat.timestamp_sec,
+      intensity: sortedRefDrops[i]?.intensity ?? beat.intensity,
+    }))
+    .sort((a, b) => a.time - b.time);
 
   return { beatPulseEvents, beatResponseEvents, dropZoneEvents };
 }
@@ -439,23 +489,38 @@ function adaptRhythm(
 function buildTargetMoodSegments(
   segments: StyleDNA["color"]["moodSegments"],
   targetDuration: number,
-  sourceDuration: number,
+  sourceDuration: number
 ): AdaptedStyleDNA["color"]["moodGradeSegments"] {
   if (!segments || segments.length === 0) return [];
 
   let cursor = 0;
   const mapped: AdaptedStyleDNA["color"]["moodGradeSegments"] = [];
   for (const seg of segments) {
-    const ratio = Math.max(0.01, (seg.end_sec - seg.start_sec) / Math.max(sourceDuration, 0.001));
+    const ratio = Math.max(
+      0.01,
+      (seg.end_sec - seg.start_sec) / Math.max(sourceDuration, 0.001)
+    );
     const dur = ratio * targetDuration;
     const start = cursor;
     const end = Math.min(targetDuration, start + dur);
     cursor = end;
 
-    const brightness = Math.max(-0.12, Math.min(0.12, (seg.labMean.l - 50) / 120));
-    const contrast = Math.max(0.82, Math.min(1.28, 0.9 + seg.contrastMean * 0.2));
-    const saturation = Math.max(0.72, Math.min(1.38, 0.9 + Math.sqrt(Math.max(0, seg.saturationVariance)) * 0.7));
-    const lutStrength = Math.max(0.2, Math.min(1.0, 0.5 + seg.saturationVariance * 1.2));
+    const brightness = Math.max(
+      -0.12,
+      Math.min(0.12, (seg.labMean.l - 50) / 120)
+    );
+    const contrast = Math.max(
+      0.82,
+      Math.min(1.28, 0.9 + seg.contrastMean * 0.2)
+    );
+    const saturation = Math.max(
+      0.72,
+      Math.min(1.38, 0.9 + Math.sqrt(Math.max(0, seg.saturationVariance)) * 0.7)
+    );
+    const lutStrength = Math.max(
+      0.2,
+      Math.min(1.0, 0.5 + seg.saturationVariance * 1.2)
+    );
 
     mapped.push({ start, end, brightness, contrast, saturation, lutStrength });
   }
@@ -466,7 +531,10 @@ function buildTargetMoodSegments(
   return mapped.filter((m) => m.end - m.start > 0.01);
 }
 
-function buildDepthAwareZoomExpr(dna: StyleDNA, ctx: TargetContentContext): string | null {
+function buildDepthAwareZoomExpr(
+  dna: StyleDNA,
+  ctx: TargetContentContext
+): string | null {
   const fps = 30;
   const frames = Math.max(1, Math.round(ctx.duration * fps));
   const avgDepth = ctx.depthData?.avgMeanDepth ?? 0.5;
@@ -474,14 +542,23 @@ function buildDepthAwareZoomExpr(dna: StyleDNA, ctx: TargetContentContext): stri
 
   if (avgDepth < 0.45) {
     // Foreground-dominant: push-in zoom
-    const maxZoom = Math.max(1.02, Math.min(1.22, 1 + 0.06 + dna.motion.cameraEnergy * 0.14));
+    const maxZoom = Math.max(
+      1.02,
+      Math.min(1.22, 1 + 0.06 + dna.motion.cameraEnergy * 0.14)
+    );
     const rate = (maxZoom - 1) / frames;
     return `zoompan=z='min(1+${rate.toFixed(7)}*on,${maxZoom.toFixed(4)})':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${ctx.width}x${ctx.height}:fps=${fps}`;
   }
 
   // Background/deep scene: parallax pan with subtle zoom
-  const ampX = Math.max(4, Math.round(ctx.width * 0.012 * Math.max(0.25, parallax)));
-  const ampY = Math.max(3, Math.round(ctx.height * 0.009 * Math.max(0.25, parallax)));
+  const ampX = Math.max(
+    4,
+    Math.round(ctx.width * 0.012 * Math.max(0.25, parallax))
+  );
+  const ampY = Math.max(
+    3,
+    Math.round(ctx.height * 0.009 * Math.max(0.25, parallax))
+  );
   const biasX = dna.motion.motionDirectionBias.x >= 0 ? 1 : -1;
   const biasY = dna.motion.motionDirectionBias.y >= 0 ? 1 : -1;
   return `zoompan=z='1.02+0.01*sin(on/${(fps * 1.8).toFixed(2)})':d=1:x='iw/2-(iw/zoom/2)+${biasX * ampX}*sin(on/${(fps * 1.6).toFixed(2)})':y='ih/2-(ih/zoom/2)+${biasY * ampY}*cos(on/${(fps * 2.2).toFixed(2)})':s=${ctx.width}x${ctx.height}:fps=${fps}`;
@@ -493,7 +570,7 @@ function buildDepthAwareZoomExpr(dna: StyleDNA, ctx: TargetContentContext): stri
 
 function adaptTexture(
   dna: StyleDNA,
-  ctx: TargetContentContext,
+  ctx: TargetContentContext
 ): AdaptedStyleDNA["texture"] {
   const { duration } = ctx;
   const { texture } = dna;
@@ -508,7 +585,11 @@ function adaptTexture(
   const sharpnessFilter = `unsharp=3:3:${texture.sharpnessProfile.toFixed(1)}:3:3:0.0`;
 
   // ── Blur: SEMANTIC — placed at target's motion peaks ──────────────────
-  const blurEvents = buildSemanticBlurEvents(texture.blurPattern, ctx, duration);
+  const blurEvents = buildSemanticBlurEvents(
+    texture.blurPattern,
+    ctx,
+    duration
+  );
 
   return { grainFilter, sharpnessFilter, blurEvents };
 }
@@ -527,7 +608,7 @@ function adaptTexture(
 function selectTopCandidates(
   candidates: Array<{ time: number; score: number }>,
   count: number,
-  minGap: number,
+  minGap: number
 ): number[] {
   if (count <= 0 || candidates.length === 0) return [];
 
@@ -547,7 +628,7 @@ function selectTopCandidates(
 function findNearestBeat(
   time: number,
   beats: BeatEvent[],
-  maxDelta: number,
+  maxDelta: number
 ): number | null {
   let best: number | null = null;
   let bestDist = maxDelta;
@@ -568,12 +649,18 @@ function findNearestBeat(
  * curves filter for statistical colour matching.
  * This is TIMELESS — no timeline mapping needed, just histogram maths.
  */
-function buildCDFCurvesFilter(cdf: { r: number[]; g: number[]; b: number[] }): string {
+function buildCDFCurvesFilter(cdf: {
+  r: number[];
+  g: number[];
+  b: number[];
+}): string {
   const buildChannelCurve = (cdfArr: number[]): string => {
     const points: string[] = [];
     for (let i = 0; i <= 255; i += 8) {
       const inVal = (Math.min(255, i) / 255).toFixed(4);
-      const outVal = Math.max(0, Math.min(1, cdfArr[Math.min(255, i)])).toFixed(4);
+      const outVal = Math.max(0, Math.min(1, cdfArr[Math.min(255, i)])).toFixed(
+        4
+      );
       points.push(`${inVal}/${outVal}`);
     }
     // Always include the 1.0 endpoint
@@ -612,10 +699,13 @@ function buildCDFCurvesFilter(cdf: { r: number[]; g: number[]; b: number[] }): s
 function buildSemanticTemporalSendcmd(
   refSamples: TemporalColorSample[],
   targetBeats: BeatEvent[],
-  targetDuration: number,
-  refDuration: number,
+  targetDuration: number
 ): Array<{ time: number; contrastRatio: number; saturationRatio: number }> {
-  if (refSamples.length < 2) return [];
+  if (refSamples.length < 2) {
+    throw new Error(
+      "[STRICT FAILURE] Insufficient temporal color samples in reference."
+    );
+  }
 
   const refMeanContrast =
     refSamples.reduce((s, t) => s + t.contrast, 0) / refSamples.length || 1;
@@ -623,7 +713,9 @@ function buildSemanticTemporalSendcmd(
     refSamples.reduce((s, t) => s + t.saturation, 0) / refSamples.length || 1;
 
   // ── Build brightness percentile rank for each reference sample ───────
-  const sortedBrightness = [...refSamples.map((s) => s.brightness)].sort((a, b) => a - b);
+  const sortedBrightness = [...refSamples.map((s) => s.brightness)].sort(
+    (a, b) => a - b
+  );
 
   const getPercentileRank = (brightness: number): number => {
     const idx = sortedBrightness.findIndex((b) => b >= brightness);
@@ -635,8 +727,14 @@ function buildSemanticTemporalSendcmd(
     energyRank: getPercentileRank(s.brightness),
   }));
 
-  const result: Array<{ time: number; contrastRatio: number; saturationRatio: number }> = [];
-  const activeBeats = targetBeats.filter((b) => b.timestamp_sec < targetDuration - 0.05);
+  const result: Array<{
+    time: number;
+    contrastRatio: number;
+    saturationRatio: number;
+  }> = [];
+  const activeBeats = targetBeats.filter(
+    (b) => b.timestamp_sec < targetDuration - 0.05
+  );
 
   if (activeBeats.length > 0) {
     // ── Semantic path: energy-level matched ────────────────────────────
@@ -662,24 +760,18 @@ function buildSemanticTemporalSendcmd(
       });
     }
   } else {
-    // ── Proportional fallback: no beat data in target ─────────────────
-    for (const sample of refSamples) {
-      const targetTime = Math.max(
-        0,
-        (sample.time_sec / Math.max(refDuration, 0.001)) * targetDuration,
-      );
-      result.push({
-        time: targetTime,
-        contrastRatio: sample.contrast / refMeanContrast,
-        saturationRatio: sample.saturation / refMeanSaturation,
-      });
-    }
+    throw new Error(
+      "[STRICT FAILURE] Missing target beat events for semantic color mapping."
+    );
   }
 
   // De-duplicate by rounding to 3 decimal places — keep last entry per key
-  const deduped = new Map<number, { time: number; contrastRatio: number; saturationRatio: number }>();
+  const deduped = new Map<
+    number,
+    { time: number; contrastRatio: number; saturationRatio: number }
+  >();
   for (const entry of result) {
-    const key = parseFloat(entry.time.toFixed(3));
+    const key = Number.parseFloat(entry.time.toFixed(3));
     deduped.set(key, { ...entry, time: key });
   }
 
@@ -702,12 +794,14 @@ function buildSemanticTemporalSendcmd(
 function buildSemanticBlurEvents(
   blurPattern: StyleDNA["texture"]["blurPattern"],
   ctx: TargetContentContext,
-  targetDuration: number,
+  targetDuration: number
 ): Array<{ time: number; radius: number }> {
   if (blurPattern.length === 0) return [];
 
   // Sort ref blur events by blurLevel descending (most intense first)
-  const sortedRefBlur = [...blurPattern].sort((a, b) => b.blurLevel - a.blurLevel);
+  const sortedRefBlur = [...blurPattern].sort(
+    (a, b) => b.blurLevel - a.blurLevel
+  );
 
   // Find target motion peaks: velocity > 1.2× baseline
   const velocityTl = ctx.motionData.velocityTimeline ?? [];
@@ -727,16 +821,9 @@ function buildSemanticBlurEvents(
       });
     }
   } else {
-    // ── Fallback: proportional mapping (but still by blur intensity) ───
-    for (const blur of sortedRefBlur) {
-      const targetTime = Math.max(
-        0,
-        (blur.refTime / Math.max(ctx.motionData.peakMagnitude, 1)) * targetDuration,
-      );
-      if (targetTime < targetDuration - 0.05) {
-        events.push({ time: targetTime, radius: blur.radius });
-      }
-    }
+    throw new Error(
+      "[STRICT FAILURE] Missing target motion peaks for semantic blur mapping."
+    );
   }
 
   return events.sort((a, b) => a.time - b.time);
@@ -756,7 +843,7 @@ function buildSemanticBlurEvents(
 function buildSemanticSetpts(
   velocityTimeline: Array<{ time_sec: number; relative_speed: number }>,
   targetDuration: number,
-  energyRatio: number,
+  energyRatio: number
 ): string | null {
   if (velocityTimeline.length < 2) return null;
 
@@ -784,7 +871,7 @@ function buildSemanticSetpts(
   for (let i = 0; i < scaledTimeline.length - 1; i++) {
     const speed = Math.max(
       MIN_SPEED,
-      Math.min(MAX_SPEED, scaledTimeline[i].relative_speed || 1.0),
+      Math.min(MAX_SPEED, scaledTimeline[i].relative_speed || 1.0)
     );
     const inStart = scaledTimeline[i].time_sec;
     const inEnd = scaledTimeline[i + 1].time_sec;
@@ -804,8 +891,14 @@ function buildSemanticSetpts(
     let cursor = 0;
     for (let i = 0; i < segs.length; i += step) {
       const s = segs[i];
-      const end = i + step < segs.length ? segs[i + step].inStart : targetDuration;
-      decimated.push({ inStart: s.inStart, inEnd: end, speed: s.speed, outStart: cursor });
+      const end =
+        i + step < segs.length ? segs[i + step].inStart : targetDuration;
+      decimated.push({
+        inStart: s.inStart,
+        inEnd: end,
+        speed: s.speed,
+        outStart: cursor,
+      });
       cursor += (end - s.inStart) / s.speed;
     }
     segs = decimated;

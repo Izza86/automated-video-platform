@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 // Routes to prefetch for faster navigation
 const PREFETCH_ROUTES = [
@@ -29,8 +29,10 @@ export function RoutePrefetcher() {
     };
 
     // Prefer requestIdleCallback when available to avoid impacting main thread
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      const id = (window as any).requestIdleCallback(prefetchAll, { timeout: 2000 });
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const id = (window as any).requestIdleCallback(prefetchAll, {
+        timeout: 2000,
+      });
       return () => (window as any).cancelIdleCallback(id);
     }
 
@@ -41,9 +43,11 @@ export function RoutePrefetcher() {
     const onHover = (e: Event) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
-      const el = target.closest && (target.closest('[data-prefetch]') as HTMLElement | null);
+      const el =
+        target.closest &&
+        (target.closest("[data-prefetch]") as HTMLElement | null);
       if (!el) return;
-      const route = el.getAttribute('data-prefetch');
+      const route = el.getAttribute("data-prefetch");
       if (route && !prefetched.has(route)) {
         try {
           router.prefetch(route);
@@ -54,11 +58,11 @@ export function RoutePrefetcher() {
       }
     };
 
-    document.addEventListener('pointerenter', onHover, { capture: true });
+    document.addEventListener("pointerenter", onHover, { capture: true });
 
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('pointerenter', onHover, { capture: true });
+      document.removeEventListener("pointerenter", onHover, { capture: true });
     };
   }, [router]);
 

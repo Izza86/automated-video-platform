@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
-import { auth } from "@/lib/auth";
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
+import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/drizzle";
 import { user } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+import { stripe } from "@/lib/stripe";
 
 export async function POST(req: NextRequest) {
   try {
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
       metadata: {
         userId: session.user.id,
-        planId: planId,
+        planId,
       },
       subscription_data: {
         trial_period_days: 14, // 14-day free trial

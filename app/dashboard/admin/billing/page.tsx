@@ -1,12 +1,13 @@
-import { 
-  getAllSubscriptions, 
-  getSubscriptionStats, 
-  getRecentPayments,
-  getSubscriptionGrowth 
-} from "@/server/admin-subscriptions";
-import { checkIsAdmin } from "@/server/permissions";
-import { redirect } from "next/navigation";
+import {
+  CalendarDays,
+  CreditCard,
+  DollarSign,
+  TrendingUp,
+  Users,
+} from "lucide-react";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { redirect } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -14,7 +15,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -23,19 +23,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { 
-  DollarSign, 
-  Users, 
-  TrendingUp, 
-  CreditCard,
-  CalendarDays 
-} from "lucide-react";
+import {
+  getAllSubscriptions,
+  getRecentPayments,
+  getSubscriptionGrowth,
+  getSubscriptionStats,
+} from "@/server/admin-subscriptions";
+import { checkIsAdmin } from "@/server/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminBillingPage() {
   const isAdmin = await checkIsAdmin();
-  
+
   if (!isAdmin) {
     redirect("/dashboard");
   }
@@ -55,12 +55,11 @@ export default async function AdminBillingPage() {
     redirect("/dashboard");
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
     }).format(amount);
-  };
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -76,8 +75,10 @@ export default async function AdminBillingPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Subscription Management</h1>
-        <p className="text-muted-foreground mt-2">
+        <h1 className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text font-bold text-3xl text-transparent">
+          Subscription Management
+        </h1>
+        <p className="mt-2 text-muted-foreground">
           Monitor subscriptions, revenue, and billing analytics
         </p>
       </div>
@@ -86,27 +87,29 @@ export default async function AdminBillingPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
+            <CardTitle className="font-medium text-sm">
               Active Subscriptions
             </CardTitle>
             <Users className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.activeSubscriptions}</div>
-            <p className="text-xs text-muted-foreground">
-              Paying customers
-            </p>
+            <div className="font-bold text-2xl">
+              {stats.activeSubscriptions}
+            </div>
+            <p className="text-muted-foreground text-xs">Paying customers</p>
           </CardContent>
         </Card>
 
         <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">MRR</CardTitle>
+            <CardTitle className="font-medium text-sm">MRR</CardTitle>
             <DollarSign className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(stats.mrr)}</div>
-            <p className="text-xs text-muted-foreground">
+            <div className="font-bold text-2xl">
+              {formatCurrency(stats.mrr)}
+            </div>
+            <p className="text-muted-foreground text-xs">
               Monthly recurring revenue
             </p>
           </CardContent>
@@ -114,12 +117,14 @@ export default async function AdminBillingPage() {
 
         <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">ARR</CardTitle>
+            <CardTitle className="font-medium text-sm">ARR</CardTitle>
             <TrendingUp className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(stats.arr)}</div>
-            <p className="text-xs text-muted-foreground">
+            <div className="font-bold text-2xl">
+              {formatCurrency(stats.arr)}
+            </div>
+            <p className="text-muted-foreground text-xs">
               Annual recurring revenue
             </p>
           </CardContent>
@@ -127,16 +132,14 @@ export default async function AdminBillingPage() {
 
         <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">This Month</CardTitle>
+            <CardTitle className="font-medium text-sm">This Month</CardTitle>
             <CalendarDays className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="font-bold text-2xl">
               {formatCurrency(stats.monthlyRevenue)}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Revenue this month
-            </p>
+            <p className="text-muted-foreground text-xs">Revenue this month</p>
           </CardContent>
         </Card>
       </div>
@@ -151,12 +154,15 @@ export default async function AdminBillingPage() {
           <CardContent>
             <div className="space-y-4">
               {stats.subscriptionsByPlan.map((plan) => (
-                <div key={plan.planName} className="flex items-center justify-between">
+                <div
+                  className="flex items-center justify-between"
+                  key={plan.planName}
+                >
                   <div className="flex items-center gap-2">
                     <div className="h-2 w-2 rounded-full bg-purple-600" />
-                    <span className="text-sm font-medium">{plan.planName}</span>
+                    <span className="font-medium text-sm">{plan.planName}</span>
                   </div>
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-muted-foreground text-sm">
                     {plan.count} users
                   </span>
                 </div>
@@ -173,14 +179,19 @@ export default async function AdminBillingPage() {
           <CardContent>
             <div className="space-y-4">
               {stats.subscriptionsByStatus.map((status) => (
-                <div key={status.status} className="flex items-center justify-between">
+                <div
+                  className="flex items-center justify-between"
+                  key={status.status}
+                >
                   <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${getStatusColor(status.status)}`} />
-                    <span className="text-sm font-medium capitalize">
+                    <div
+                      className={`h-2 w-2 rounded-full ${getStatusColor(status.status)}`}
+                    />
+                    <span className="font-medium text-sm capitalize">
                       {status.status.replace("_", " ")}
                     </span>
                   </div>
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-muted-foreground text-sm">
                     {status.count}
                   </span>
                 </div>
@@ -213,7 +224,10 @@ export default async function AdminBillingPage() {
             <TableBody>
               {recentPayments.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell
+                    className="text-center text-muted-foreground"
+                    colSpan={5}
+                  >
                     No payments yet
                   </TableCell>
                 </TableRow>
@@ -270,7 +284,10 @@ export default async function AdminBillingPage() {
             <TableBody>
               {subscriptions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell
+                    className="text-center text-muted-foreground"
+                    colSpan={6}
+                  >
                     No subscriptions yet
                   </TableCell>
                 </TableRow>
@@ -284,12 +301,12 @@ export default async function AdminBillingPage() {
                     <TableCell>{item.plan.name}</TableCell>
                     <TableCell>
                       <Badge
+                        className={getStatusColor(item.subscription.status)}
                         variant={
                           item.subscription.status === "active"
                             ? "default"
                             : "secondary"
                         }
-                        className={getStatusColor(item.subscription.status)}
                       >
                         {item.subscription.status}
                       </Badge>

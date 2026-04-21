@@ -1,8 +1,8 @@
 "use server";
 
+import crypto from "crypto";
 import { auth } from "@/lib/auth";
 import { getCurrentUser } from "./users";
-import crypto from "crypto";
 
 interface PasswordResetToken {
   token: string;
@@ -16,7 +16,7 @@ const resetTokens = new Map<string, PasswordResetToken>();
 export const requestPasswordChange = async () => {
   const authData = await getCurrentUser();
 
-  if (!authData || !authData.currentUser) {
+  if (!(authData && authData.currentUser)) {
     return { success: false, message: "Not authenticated" };
   }
 
@@ -76,7 +76,10 @@ export const changePasswordWithToken = async (
 
     // Validate password strength
     if (newPassword.length < 8) {
-      return { success: false, message: "Password must be at least 8 characters" };
+      return {
+        success: false,
+        message: "Password must be at least 8 characters",
+      };
     }
 
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;
@@ -117,7 +120,7 @@ export const changePasswordDirect = async (
 ) => {
   const authData = await getCurrentUser();
 
-  if (!authData || !authData.currentUser) {
+  if (!(authData && authData.currentUser)) {
     return { success: false, message: "Not authenticated" };
   }
 
@@ -126,7 +129,10 @@ export const changePasswordDirect = async (
   try {
     // Validate new password strength
     if (newPassword.length < 8) {
-      return { success: false, message: "Password must be at least 8 characters" };
+      return {
+        success: false,
+        message: "Password must be at least 8 characters",
+      };
     }
 
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;

@@ -48,31 +48,33 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-
+import { analyzeMotion } from "../analysis/motion-analysis";
+import { detectShots } from "../analysis/shot-detection";
+import { extractColorGrading } from "../style/color-grading";
+import { adaptToTargetContent } from "../style/style-dna-adapter";
+import { extractStyleDNA } from "../style/style-dna-extractor";
 import type {
-  FullVideoMetadata,
+  BeatEvent,
+  ColorGradingResult,
   EditTransferResult,
+  FullVideoMetadata,
+  ShotBoundary,
+  ShotDetectionResult,
   VelocitySegment,
   VelocityTimelinePoint,
-  ColorGradingResult,
-  ShotDetectionResult,
-  ShotBoundary,
-  AudioBeatResult,
-  BeatEvent,
-  CameraMotionSample,
 } from "../types";
 import type { TargetContentContext } from "../types/style-dna";
+import { checkColabHealth } from "../utils/colab-healthcheck";
 import {
+  cleanTempDir,
+  fwdPath,
+  makeTempDir,
+  probeVideo,
   resolveFfmpeg,
   safeExe,
-  execAsync,
-  probeVideo,
-  makeTempDir,
-  cleanTempDir,
   writeTempFile,
 } from "../utils/ffmpeg";
-import { extractStyleDNA } from "../style/style-dna-extractor";
-import { adaptToTargetContent } from "../style/style-dna-adapter";
+import { runFFmpegSafe, validateFile } from "../utils/ffmpeg-safe";
 import { generateFilterGraph } from "./filter-graph-generator";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +88,59 @@ const MAX_SPEED = 4.0;
 /** Safety cap for loop iterations — FFmpeg's expression parser chokes on
  *  nested if(between(...)) deeper than ~60.  Keep well under that limit. */
 const MAX_LOOP_ITERATIONS = 50;
+const STYLE_MATCH_TOLERANCE = 0.2;
+
+async function validatePostRenderMatch(
+  outputPath: string,
+  refMeta: FullVideoMetadata
+): Promise<{ ok: boolean; score: number; reason?: string }> {
+  const outputBuffer = await fs.promises.readFile(outputPath);
+  const [outShots, outMotion, outColor] = await Promise.all([
+    detectShots(outputBuffer),
+    analyzeMotion(outputBuffer),
+    extractColorGrading(outputBuffer),
+  ]);
+
+  const refCuts = refMeta.shotDetection.cuts.length;
+  const outCuts = outShots.cuts.length;
+  const cutMismatch = Math.abs(outCuts - refCuts) / Math.max(1, refCuts);
+
+  const refBrightness = refMeta.colorGrading.meanLuminance;
+  const outBrightness = outColor.meanLuminance;
+  const brightnessMismatch =
+    Math.abs(outBrightness - refBrightness) / Math.max(1, refBrightness);
+
+  const refMotion = refMeta.motion.motionIntensity;
+  const outMotionIntensity = outMotion.motionIntensity;
+  const motionMismatch =
+    Math.abs(outMotionIntensity - refMotion) / Math.max(0.001, refMotion);
+
+  const score =
+    (1 -
+      Math.min(
+        1,
+        (cutMismatch + brightnessMismatch + motionMismatch) / 3
+      )) *
+    100;
+
+  if (
+    cutMismatch > STYLE_MATCH_TOLERANCE ||
+    brightnessMismatch > STYLE_MATCH_TOLERANCE ||
+    motionMismatch > STYLE_MATCH_TOLERANCE
+  ) {
+    return {
+      ok: false,
+      score: Number(score.toFixed(2)),
+      reason:
+        `Post-render mismatch exceeded 20%: ` +
+        `cuts=${(cutMismatch * 100).toFixed(1)}%, ` +
+        `brightness=${(brightnessMismatch * 100).toFixed(1)}%, ` +
+        `motion=${(motionMismatch * 100).toFixed(1)}%`,
+    };
+  }
+
+  return { ok: true, score: Number(score.toFixed(2)) };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colab GPU Remote Render
@@ -133,18 +188,30 @@ async function renderOnColab(opts: {
 
     // Target video (required)
     const targetBuf = await fs.promises.readFile(opts.targetPath);
-    formData.append("target", new Blob([targetBuf], { type: "video/mp4" }), "target.mp4");
+    formData.append(
+      "target",
+      new Blob([targetBuf], { type: "video/mp4" }),
+      "target.mp4"
+    );
 
     // Reference video (optional — for audio)
     if (opts.referencePath && fs.existsSync(opts.referencePath)) {
       const refBuf = await fs.promises.readFile(opts.referencePath);
-      formData.append("reference", new Blob([refBuf], { type: "video/mp4" }), "reference.mp4");
+      formData.append(
+        "reference",
+        new Blob([refBuf], { type: "video/mp4" }),
+        "reference.mp4"
+      );
     }
 
     // HALD CLUT (optional)
     if (opts.haldPath && fs.existsSync(opts.haldPath)) {
       const haldBuf = await fs.promises.readFile(opts.haldPath);
-      formData.append("hald_clut", new Blob([haldBuf], { type: "image/png" }), "hald_clut.png");
+      formData.append(
+        "hald_clut",
+        new Blob([haldBuf], { type: "image/png" }),
+        "hald_clut.png"
+      );
     }
 
     // Filter graph — the __SENDCMD_PATH__ placeholder in the graph
@@ -187,7 +254,7 @@ async function renderOnColab(opts: {
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown");
       console.warn(
-        `[edit-transfer] Colab render returned ${response.status}: ${errText.slice(0, 500)}`,
+        `[edit-transfer] Colab render returned ${response.status}: ${errText.slice(0, 500)}`
       );
       return null;
     }
@@ -197,7 +264,7 @@ async function renderOnColab(opts: {
     const buf = Buffer.from(arrayBuf);
 
     console.log(
-      `[edit-transfer] ✅ Colab render succeeded: ${(buf.length / 1024).toFixed(0)}KB in ${renderMs}ms`,
+      `[edit-transfer] ✅ Colab render succeeded: ${(buf.length / 1024).toFixed(0)}KB in ${renderMs}ms`
     );
     return buf;
   } catch (err) {
@@ -207,7 +274,7 @@ async function renderOnColab(opts: {
       console.warn(
         `[edit-transfer] Colab render failed, falling back to local FFmpeg: ${
           err instanceof Error ? err.message : String(err)
-        }`,
+        }`
       );
     }
     return null;
@@ -238,7 +305,7 @@ export interface TransferOptions {
 export async function transferEdit(
   targetBuffer: Buffer,
   refMeta: FullVideoMetadata,
-  opts: TransferOptions = {},
+  opts: TransferOptions = {}
 ): Promise<EditTransferResult> {
   const t0 = performance.now();
   const tmp = makeTempDir("edit-transfer");
@@ -249,7 +316,11 @@ export async function transferEdit(
     // ── Write reference video to disk for audio extraction ────────────
     let referencePath: string | null = null;
     if (opts.referenceBuffer) {
-      referencePath = await writeTempFile(tmp, "reference.mp4", opts.referenceBuffer);
+      referencePath = await writeTempFile(
+        tmp,
+        "reference.mp4",
+        opts.referenceBuffer
+      );
     }
 
     const outputDir = path.join(process.cwd(), "public", "outputs");
@@ -265,7 +336,9 @@ export async function transferEdit(
       try {
         const refProbe = await probeVideo(referencePath);
         refDuration = refProbe.duration || refDuration;
-      } catch { /* use metadata duration */ }
+      } catch {
+        /* use metadata duration */
+      }
     }
 
     const cg = refMeta.colorGrading;
@@ -303,38 +376,44 @@ export async function transferEdit(
     const h = opts.outputHeight ?? 1920;
 
     // ── Stage 1: Extract StyleDNA from reference metadata ─────────────
-    console.log("[edit-transfer] Stage 1: Extracting StyleDNA from reference...");
+    console.log(
+      "[edit-transfer] Stage 1: Extracting StyleDNA from reference..."
+    );
     const refDNA = extractStyleDNA(refMeta);
     console.log(
-      `[edit-transfer] StyleDNA extracted: ` +
+      "[edit-transfer] StyleDNA extracted: " +
         `pacing=${refDNA.pacing.editingPace}(${refDNA.pacing.cutDensity.toFixed(2)}cuts/s), ` +
         `motion=${refDNA.motion.velocityProfile}(energy=${refDNA.motion.cameraEnergy.toFixed(2)}), ` +
         `rhythm=${refDNA.rhythm.bpm.toFixed(0)}bpm(${refDNA.rhythm.dropZones.length}drops), ` +
         `lighting=flicker${refDNA.lighting.flickerFreq.toFixed(1)}Hz, ` +
-        `texture=${refDNA.texture.filmStockLabel}(grain=${refDNA.texture.grainProfile.strength})`,
+        `texture=${refDNA.texture.filmStockLabel}(grain=${refDNA.texture.grainProfile.strength})`
     );
 
     // ── Stage 2: Build target context + semantic adaptation ───────────
     //    The target beats/shots are the reference's beats/shots SCALED
     //    to the target timeline.  The adapter will then select
     //    semantically important moments from within this scaled context.
-    console.log("[edit-transfer] Stage 2: Semantic adaptation to target content...");
+    console.log(
+      "[edit-transfer] Stage 2: Semantic adaptation to target content..."
+    );
 
     const targetCtx: TargetContentContext = {
       duration: targetDuration,
       // Scale reference beats to target timeline for semantic selection
       beatEvents: (ab.beatEvents ?? []).map((b) => ({
         ...b,
-        timestamp_sec: refDuration > 0
-          ? (b.timestamp_sec / refDuration) * targetDuration
-          : b.timestamp_sec,
+        timestamp_sec:
+          refDuration > 0
+            ? (b.timestamp_sec / refDuration) * targetDuration
+            : b.timestamp_sec,
       })),
       // Scale reference shot boundaries to target timeline
       shotBoundaries: sd.cuts.map((c) => ({
         ...c,
-        timestamp_sec: refDuration > 0
-          ? (c.timestamp_sec / refDuration) * targetDuration
-          : c.timestamp_sec,
+        timestamp_sec:
+          refDuration > 0
+            ? (c.timestamp_sec / refDuration) * targetDuration
+            : c.timestamp_sec,
       })),
       motionData: mo,
       depthData: refMeta.depth,
@@ -344,39 +423,31 @@ export async function transferEdit(
 
     const adaptedDNA = adaptToTargetContent(refDNA, targetCtx);
     console.log(
-      `[edit-transfer] Adaptation complete: ` +
+      "[edit-transfer] Adaptation complete: " +
         `${adaptedDNA.pacing.cutTimestamps.length} semantic cuts, ` +
         `${adaptedDNA.motion.jitterEvents.length} jitter events, ` +
         `${adaptedDNA.color.temporalSendcmd.length} color events, ` +
         `${adaptedDNA.rhythm.beatPulseEvents.length} beat pulses, ` +
-        `${adaptedDNA.texture.blurEvents.length} blur events`,
+        `${adaptedDNA.texture.blurEvents.length} blur events`
     );
 
-    // ── Shot-only segmentation + fallback pacing (v12 feature) ────────
-    // First try using hard cuts; if ≤1 detected, run fallback pacing
-    let hardCuts = sd.cuts.filter((c) => c.type === "hard_cut" && c.confidence > 0.2);
-    
-    // v12: Trigger fallback pacing if needed
+    // ── Shot-only segmentation (STRICT) ────────────────────────────────
+    const hardCuts = sd.cuts.filter(
+      (c) => c.type === "hard_cut" && c.confidence > 0.2
+    );
+
     if (hardCuts.length <= 1) {
-      console.log(
-        `[edit-transfer] Fallback pacing triggered: only ${hardCuts.length} hard cuts detected`
+      throw new Error(
+        `[STRICT FAILURE] Insufficient hard cuts detected (${hardCuts.length}). ` +
+          "Fallback pacing and synthetic cuts are disabled."
       );
-      // Import and run fallback detector
-      const { orchestrateFallbackPacing } = await import("../analysis/fallback-pacing-detector");
-      const fallbackResult = orchestrateFallbackPacing(
-        sd.cuts,
-        mo,
-        cg,
-        targetDuration
-      );
-      console.log(
-        `[edit-transfer] ${fallbackResult.reason}`
-      );
-      // Use enhanced boundaries (may include synthetic cuts)
-      hardCuts = fallbackResult.syntheticBoundaries.filter((c) => c.type === "hard_cut");
     }
 
-    const shotOnlyCutTimes = buildShotOnlyCutPoints(hardCuts, targetDuration, refDuration);
+    const shotOnlyCutTimes = buildShotOnlyCutPoints(
+      hardCuts,
+      targetDuration,
+      refDuration
+    );
     let useHardCutSegmentation = false;
     let hardCutGraph = "";
 
@@ -415,7 +486,7 @@ export async function transferEdit(
         useHardCutSegmentation = true;
         console.log(
           `[edit-transfer] Shot segmentation: ${segments.length} segments from ` +
-            `${shotOnlyCutTimes.length} TransNetV2 boundaries`,
+            `${shotOnlyCutTimes.length} TransNetV2 boundaries`
         );
       }
     }
@@ -453,7 +524,9 @@ export async function transferEdit(
 
     // When hard-cut segmentation is active, the video source is the
     // [segmented] label from the trim→concat pre-pass, not [vidIdx:v].
-    const videoSrcLabel = useHardCutSegmentation ? "[segmented]" : `[${vidIdx}:v]`;
+    const videoSrcLabel = useHardCutSegmentation
+      ? "[segmented]"
+      : `[${vidIdx}:v]`;
 
     // Loop reference audio when it is shorter than the target video.
     const loopAudio = refDuration > 0 && targetDuration > refDuration * 1.05;
@@ -480,7 +553,7 @@ export async function transferEdit(
       graphParts.push(
         `${videoSrcLabel}${videoFilterChain}[v1]`,
         `[v1][${haldIdx}:v]haldclut[v2]`,
-        `[v2]pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`,
+        `[v2]pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`
       );
       filterGraph = graphParts.join(";");
     } else {
@@ -491,7 +564,9 @@ export async function transferEdit(
         graphParts.push(hardCutGraph);
       }
 
-      graphParts.push(`${videoSrcLabel}${videoFilterChain},pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`);
+      graphParts.push(
+        `${videoSrcLabel}${videoFilterChain},pad=ceil(iw/2)*2:ceil(ih/2)*2${temporalSmoothFilter},format=yuv420p[vout]`
+      );
       filterGraph = graphParts.join(";");
     }
 
@@ -518,7 +593,7 @@ export async function transferEdit(
         // FFmpeg loops the reference audio infinitely; the -t flag and
         // atrim filter cap the output at targetDuration.
         inputs.push(`-stream_loop -1 -i "${referencePath}"`);
-        filterLog.push(`audio-loop:seamless`);
+        filterLog.push("audio-loop:seamless");
       } else {
         inputs.push(`-i "${referencePath}"`);
       }
@@ -550,26 +625,25 @@ export async function transferEdit(
     const audioFlags: string[] = [];
 
     if (hasRefAudio) {
-      mapping.push(`-map 0:a:0`);
+      mapping.push("-map 0:a:0");
       // Full audio pipeline: loop → trim → reset PTS → limiter
       // Ensures NO gaps even if RAFT stretches the video beyond
       // the reference audio duration.
       audioFlags.push(
         `-af "aloop=loop=-1:size=2e9,atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS,alimiter=limit=0.9"`,
-        `-c:a aac -b:a 192k`,
+        "-c:a aac -b:a 192k"
       );
       filterLog.push(`audio:aloop+atrim(${targetDuration.toFixed(1)}s)`);
     } else {
       mapping.push(`-map ${vidIdx}:a?`);
-      audioFlags.push(`-c:a aac -b:a 192k`);
+      audioFlags.push("-c:a aac -b:a 192k");
     }
 
     // ── Encoder: Forced High Bitrate (permanent) ─────────────────────
     const codecFlags =
-      `-c:v libx264 -profile:v high -pix_fmt yuv420p -preset slow -crf 18 -threads 0`;
+      "-c:v libx264 -profile:v high -pix_fmt yuv420p -preset slow -crf 18 -threads 0";
 
-    const bitrateFlags =
-      `-b:v 5M -minrate 3M -maxrate 8M -bufsize 16M`;
+    const bitrateFlags = "-b:v 5M -minrate 3M -maxrate 8M -bufsize 16M";
 
     // ── Final command (local fallback) ─────────────────────────────────
     //    Uses standard -filter_complex with the graph read from the
@@ -588,26 +662,85 @@ export async function transferEdit(
     //      8. -t duration    ← ALWAYS enforced for exact output length
     //      9. output path
     //
-    // Read the filter graph from the script file so we can pass it as
-    // an inline -filter_complex argument (works on FFmpeg 4.x – 8.x).
-    const filterGraphInline = fs.readFileSync(filterScriptPath, "utf-8");
-    const ffmpegCmd = [
-      exe, "-y",
-      `-analyzeduration 100M -probesize 100M`,
+    // ── Local Placeholder Resolution (STRICT) ───────────────────────
+    // If we're falling back to local FFmpeg, we MUST replace the Colab
+    // placeholders (__SENDCMD_PATH__, etc.) with the actual local paths
+    // from cmdFiles, or local FFmpeg will fail to find the .cmd files.
+    let localFilterGraph = filterGraph;
+
+    // ── Preflight validation: paths + graph ───────────────────────────
+    if (!fs.existsSync(targetPath)) {
+      throw new Error(`[STRICT FAILURE] Target input path missing: ${targetPath}`);
+    }
+    if (referencePath && !fs.existsSync(referencePath)) {
+      throw new Error(
+        `[STRICT FAILURE] Reference input path missing: ${referencePath}`
+      );
+    }
+    if (!fs.existsSync(path.dirname(outputPath))) {
+      throw new Error(
+        `[STRICT FAILURE] Output directory missing: ${path.dirname(outputPath)}`
+      );
+    }
+    if (!filterGraph || filterGraph.trim().length === 0) {
+      throw new Error("[STRICT FAILURE] filter_complex graph is empty.");
+    }
+
+    // Helper: validate and resolve a placeholder
+    const resolve = (placeholder: string, localPath: string | null) => {
+      if (!localPath) return;
+      if (!fs.existsSync(localPath)) {
+        throw new Error(`CRITICAL: Local command file missing: ${localPath}`);
+      }
+      const formatted = fwdPath(localPath);
+      localFilterGraph = localFilterGraph.replace(
+        new RegExp(placeholder, "g"),
+        formatted
+      );
+    };
+
+    resolve("__SENDCMD_PATH__", cmdFiles.temporalColor);
+    resolve("__BLURCMD_PATH__", cmdFiles.blur);
+    resolve("__TRANSCMD_PATH__", cmdFiles.transition);
+    resolve("__BEATPULSE_PATH__", cmdFiles.beatPulse);
+    resolve("__IMPACTCMD_PATH__", cmdFiles.impact);
+
+    // Hard Guard: Ensure no placeholders remain wrapped in __
+    if (/__[A-Z0-9_]+_PATH__/.test(localFilterGraph)) {
+      console.error(
+        "[render] FAILED: Unresolved placeholders in graph",
+        localFilterGraph
+      );
+      throw new Error(
+        "FFmpeg Render Aborted: Unresolved placeholders in filter graph"
+      );
+    }
+    if (!localFilterGraph || localFilterGraph.trim().length === 0) {
+      throw new Error("[STRICT FAILURE] Resolved filter_complex graph is empty.");
+    }
+
+    const filterGraphInline = localFilterGraph;
+    const ffmpegArgs = [
+      "-y",
+      "-analyzeduration 100M -probesize 100M",
       ...inputs,
-      `-filter_complex`,
+      "-filter_complex",
       `"${filterGraphInline}"`,
-      
+
       ...mapping,
       codecFlags,
       ...audioFlags,
-      `-movflags +faststart`,
+      "-movflags +faststart",
       bitrateFlags,
       // ALWAYS enforce strict output duration — prevents infinite
       // processing from -stream_loop and guarantees exact length.
       `-t ${targetDuration.toFixed(3)}`,
       `"${outputPath}"`,
     ].join(" ");
+
+    // Full command (for logging / direct execution)
+    const ffmpegCmd = `${exe} ${ffmpegArgs}`;
+    console.log("[render] final ffmpeg command:", ffmpegCmd);
 
     // ── Execute — STRICT GPU OFFLOADING ───────────────────────────
     //    Colab GPU is the PRIMARY and PREFERRED render method.
@@ -618,132 +751,205 @@ export async function transferEdit(
     console.log("[edit-transfer] Filter graph:", filterLog.join(" → "));
 
     // Read generated command-file content for Colab upload
-    const temporalColorCmdContent = cmdFiles.temporalColor && fs.existsSync(cmdFiles.temporalColor)
-      ? fs.readFileSync(cmdFiles.temporalColor, "utf-8")
-      : null;
+    const temporalColorCmdContent =
+      cmdFiles.temporalColor && fs.existsSync(cmdFiles.temporalColor)
+        ? fs.readFileSync(cmdFiles.temporalColor, "utf-8")
+        : null;
 
-    const blurCmdContent = cmdFiles.blur && fs.existsSync(cmdFiles.blur)
-      ? fs.readFileSync(cmdFiles.blur, "utf-8")
-      : null;
+    const blurCmdContent =
+      cmdFiles.blur && fs.existsSync(cmdFiles.blur)
+        ? fs.readFileSync(cmdFiles.blur, "utf-8")
+        : null;
 
-    const transitionCmdContent = cmdFiles.transition && fs.existsSync(cmdFiles.transition)
-      ? fs.readFileSync(cmdFiles.transition, "utf-8")
-      : null;
+    const transitionCmdContent =
+      cmdFiles.transition && fs.existsSync(cmdFiles.transition)
+        ? fs.readFileSync(cmdFiles.transition, "utf-8")
+        : null;
 
-    const beatPulseContent: string | null = cmdFiles.beatPulse && fs.existsSync(cmdFiles.beatPulse)
-      ? fs.readFileSync(cmdFiles.beatPulse, "utf-8")
-      : null;
+    const beatPulseContent: string | null =
+      cmdFiles.beatPulse && fs.existsSync(cmdFiles.beatPulse)
+        ? fs.readFileSync(cmdFiles.beatPulse, "utf-8")
+        : null;
 
-    const impactCmdContent: string | null = cmdFiles.impact && fs.existsSync(cmdFiles.impact)
-      ? fs.readFileSync(cmdFiles.impact, "utf-8")
-      : null;
+    const impactCmdContent: string | null =
+      cmdFiles.impact && fs.existsSync(cmdFiles.impact)
+        ? fs.readFileSync(cmdFiles.impact, "utf-8")
+        : null;
 
     const colabConfigured = !!process.env.COLAB_GPU_URL;
 
     if (colabConfigured) {
       // ── PRIMARY PATH: Colab GPU render (h264_nvenc on Tesla T4) ───
-      console.log("[edit-transfer] 🚀 COLAB_GPU_URL is set — using Colab as primary render");
+      console.log(
+        "[edit-transfer] 🚀 COLAB_GPU_URL is set — using Colab as primary render"
+      );
 
-      const colabResult = await renderOnColab({
-        targetPath,
-        referencePath,
-        haldPath: applyHald ? haldPath : null,
-        filterGraph,
-        temporalColorCmd: temporalColorCmdContent,
-        beatPulseCmd: beatPulseContent,
-        blurCmd: blurCmdContent,
-        transitionCmd: transitionCmdContent,
-        impactCmd: impactCmdContent,
-        codecFlags,
-        bitrateFlags,
-        audioFlags: audioFlags.join(" "),
-        mappingFlags: mapping.join(" "),
-        duration: targetDuration,
-        loopAudio,
-      });
+      // Pre-flight health check — avoid sending large video files
+      // to a dead server (wastes time and bandwidth)
+      const health = await checkColabHealth();
+      if (!health.healthy) {
+        console.warn(
+          `[edit-transfer] ⚠ Colab pre-flight FAILED: ${health.message}` +
+            " — falling through to local FFmpeg fallback"
+        );
+        filterLog.push(`colab-health:failed(${health.message})`);
+      }
+
+      const colabResult = health.healthy
+        ? await renderOnColab({
+            targetPath,
+            referencePath,
+            haldPath: applyHald ? haldPath : null,
+            filterGraph,
+            temporalColorCmd: temporalColorCmdContent,
+            beatPulseCmd: beatPulseContent,
+            blurCmd: blurCmdContent,
+            transitionCmd: transitionCmdContent,
+            impactCmd: impactCmdContent,
+            codecFlags,
+            bitrateFlags,
+            audioFlags: audioFlags.join(" "),
+            mappingFlags: mapping.join(" "),
+            duration: targetDuration,
+            loopAudio,
+          })
+        : null;
 
       if (colabResult) {
         // Colab rendered successfully — write to output path
         await fs.promises.writeFile(outputPath, colabResult);
         filterLog.push("render:colab-gpu(h264_nvenc)");
-        console.log(`[edit-transfer] ✅ Colab GPU render saved to ${outputPath}`);
+        console.log(
+          `[edit-transfer] ✅ Colab GPU render saved to ${outputPath}`
+        );
       } else {
-        // Colab was configured but FAILED — surface the error clearly.
-        // Do NOT silently fall back to local FFmpeg.
-        console.error("═══════════════════════════════════════════════════════════");
-        console.error("[edit-transfer] COLAB GPU RENDER FAILED");
-        console.error("[edit-transfer] COLAB_GPU_URL was set but the render did not succeed.");
-        console.error("[edit-transfer] Check that the Colab notebook is running and the");
-        console.error("[edit-transfer] ngrok tunnel URL in .env is current.");
-        console.error("═══════════════════════════════════════════════════════════");
+        // Colab was configured but FAILED (or health check failed) —
+        // gracefully fall back to local FFmpeg instead of hard-failing
+        console.warn(
+          "═══════════════════════════════════════════════════════════"
+        );
+        console.warn("[edit-transfer] COLAB GPU RENDER UNAVAILABLE");
+        console.warn(
+          "[edit-transfer] Falling back to local FFmpeg (slower, CPU-only)"
+        );
+        console.warn(
+          "═══════════════════════════════════════════════════════════"
+        );
+        filterLog.push("render:local-ffmpeg(colab-fallback)");
 
-        return {
-          success: false,
-          appliedMetadata: refMeta,
-          filterGraphSummary: filterLog.join(" → "),
-          processingMs: Math.round(performance.now() - t0),
-          error:
-            "Colab GPU render failed. Ensure the Colab notebook is running " +
-            "and COLAB_GPU_URL in .env points to the active ngrok tunnel.",
-        };
+        const localResult = await runFFmpegSafe({
+          label: "edit-transfer-render",
+          args: ffmpegArgs,
+          inputFiles: [targetPath],
+          outputFile: outputPath,
+          minOutputBytes: 50 * 1024,
+        });
+
+        if (!localResult.success) {
+          console.error(
+            "[edit-transfer] Local FFmpeg fallback also FAILED:",
+            localResult.error
+          );
+          if (localResult.stderr) {
+            console.error("[edit-transfer] FFmpeg stderr:", localResult.stderr);
+          }
+          return {
+            success: false,
+            appliedMetadata: refMeta,
+            filterGraphSummary: filterLog.join(" → "),
+            processingMs: Math.round(performance.now() - t0),
+            error: `Both Colab GPU and local FFmpeg failed.\nColab: ${health.message}\nLocal: ${localResult.error}`,
+          };
+        }
       }
     } else {
       // ── EMERGENCY FALLBACK: Local FFmpeg (no Colab configured) ───
       console.warn(
-        "[edit-transfer] ⚠ COLAB_GPU_URL not set — using local FFmpeg (slower, CPU-only)",
+        "[edit-transfer] ⚠ COLAB_GPU_URL not set — using local FFmpeg (slower, CPU-only)"
       );
       filterLog.push("render:local-ffmpeg(emergency)");
       console.log("[edit-transfer] FFmpeg command:", ffmpegCmd);
 
-      try {
-        const { stderr } = await execAsync(ffmpegCmd, { maxBuffer: 200 * 1024 * 1024 });
-        if (stderr) {
-          const lastLines = stderr.split("\n").slice(-15).join("\n");
-          console.log("[edit-transfer] FFmpeg stderr (last 15 lines):\n", lastLines);
-        }
-      } catch (ffErr: unknown) {
-        const errObj = ffErr as { stderr?: string; stdout?: string; message?: string };
-        const fullStderr = errObj.stderr || "";
-        const fullMsg = errObj.message || String(ffErr);
+      const localResult = await runFFmpegSafe({
+        label: "edit-transfer-render-local",
+        args: ffmpegArgs,
+        inputFiles: [targetPath],
+        outputFile: outputPath,
+        minOutputBytes: 50 * 1024,
+      });
 
-        console.error("═══════════════════════════════════════════════════════════");
-        console.error("[edit-transfer] LOCAL FFMPEG FAILED (emergency fallback)");
-        console.error("═══════════════════════════════════════════════════════════");
-        console.error("[edit-transfer] Command:\n", ffmpegCmd);
-        console.error("[edit-transfer] Full stderr:\n", fullStderr);
-        console.error("[edit-transfer] Error message:\n", fullMsg);
-        console.error("═══════════════════════════════════════════════════════════");
+      if (!localResult.success) {
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
+        console.error(
+          "[edit-transfer] LOCAL FFMPEG FAILED (emergency fallback)"
+        );
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
+        console.error("[edit-transfer] Error:", localResult.error);
+        if (localResult.stderr) {
+          console.error("[edit-transfer] stderr:", localResult.stderr);
+        }
+        console.error(
+          "═══════════════════════════════════════════════════════════"
+        );
 
         return {
           success: false,
           appliedMetadata: refMeta,
           filterGraphSummary: filterLog.join(" → "),
           processingMs: Math.round(performance.now() - t0),
-          error: `Local FFmpeg FAILED. Set COLAB_GPU_URL for GPU rendering.\n${fullStderr}\n\n${fullMsg}`,
+          error: `Local FFmpeg FAILED. Set COLAB_GPU_URL for GPU rendering.\n${localResult.error}\n${localResult.stderr ?? ""}`,
         };
       }
     }
 
-    // Verify output file was actually created and has meaningful content
-    if (!fs.existsSync(outputPath)) {
+    // ── Validate output file (unified for both Colab and local paths) ──
+    const outputCheckErr = validateFile(outputPath, "render-output", 50 * 1024);
+    if (outputCheckErr) {
+      // If the file doesn't exist at all, that's a hard failure.
+      // If it exists but is small, just warn.
+      if (!fs.existsSync(outputPath)) {
+        return {
+          success: false,
+          appliedMetadata: refMeta,
+          filterGraphSummary: filterLog.join(" → "),
+          processingMs: Math.round(performance.now() - t0),
+          error: `Render completed but output validation failed: ${outputCheckErr}`,
+        };
+      }
+      console.error(
+        `[edit-transfer] ⚠ ${outputCheckErr}. ` +
+          `Likely bitrate collapse / black video. Filter chain: ${filterLog.join(" → ")}`
+      );
+      // Don't fail — user might still want the file — but log prominently
+    }
+    if (fs.existsSync(outputPath)) {
+      const renderedSize = fs.statSync(outputPath).size;
+      if (renderedSize === 0) {
+        return {
+          success: false,
+          appliedMetadata: refMeta,
+          filterGraphSummary: filterLog.join(" → "),
+          processingMs: Math.round(performance.now() - t0),
+          error: "Render failed: output video size is 0 bytes.",
+        };
+      }
+    }
+
+    // ── Post-render validation: cuts / brightness / motion ────────────
+    const postRender = await validatePostRenderMatch(outputPath, refMeta);
+    if (!postRender.ok) {
       return {
         success: false,
         appliedMetadata: refMeta,
         filterGraphSummary: filterLog.join(" → "),
         processingMs: Math.round(performance.now() - t0),
-        error: "FFmpeg completed but failed to create output file.",
+        styleMatchScore: postRender.score,
+        error: postRender.reason ?? "Post-render validation failed.",
       };
-    }
-
-    // Reject suspiciously small outputs (< 50KB for a video = likely black/corrupt)
-    const outputStat = fs.statSync(outputPath);
-    const outputSizeKB = outputStat.size / 1024;
-    if (outputSizeKB < 50) {
-      console.error(
-        `[edit-transfer] ⚠ Output file suspiciously small: ${outputSizeKB.toFixed(1)}KB. ` +
-        `Likely bitrate collapse / black video. Filter chain: ${filterLog.join(" → ")}`
-      );
-      // Don't fail — user might still want the file — but log prominently
     }
 
     // ── Derive a browser-accessible URL ───────────────────────────────
@@ -761,6 +967,7 @@ export async function transferEdit(
         appliedMetadata: refMeta,
         filterGraphSummary: filterLog.join(" → "),
         processingMs: Math.round(performance.now() - t0),
+        styleMatchScore: postRender.score,
       };
     }
 
@@ -777,6 +984,7 @@ export async function transferEdit(
       appliedMetadata: refMeta,
       filterGraphSummary: filterLog.join(" → "),
       processingMs: Math.round(performance.now() - t0),
+      styleMatchScore: postRender.score,
     };
   } finally {
     cleanTempDir(tmp);
@@ -788,9 +996,9 @@ export async function transferEdit(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function generateHaldClut(
-  exe: string,
+  _exe: string,
   outputPath: string,
-  cg: ColorGradingResult,
+  cg: ColorGradingResult
 ): Promise<boolean> {
   try {
     const filters: string[] = [];
@@ -816,10 +1024,9 @@ async function generateHaldClut(
     const graphContent = `[0:v]${filters.join(",")}[vout]`;
     fs.writeFileSync(scriptPath, graphContent, "utf-8");
 
-    const cmd = [
-      exe,
+    const haldArgs = [
       "-y",
-      `-analyzeduration 100M -probesize 100M`,
+      "-analyzeduration 100M -probesize 100M",
       `-f lavfi -i "haldclutsrc=level=8"`,
       `-filter_complex_script "${scriptPath}"`,
       `-map "[vout]"`,
@@ -827,17 +1034,29 @@ async function generateHaldClut(
       `"${outputPath}"`,
     ].join(" ");
 
-    await execAsync(cmd, { maxBuffer: 30 * 1024 * 1024 });
+    const result = await runFFmpegSafe({
+      label: "hald-clut-generation",
+      args: haldArgs,
+      outputFile: outputPath,
+      minOutputBytes: 1000, // identity CLUT ≈ 600-800KB
+    });
 
-    // Validate CLUT was generated with reasonable size (identity CLUT ≈ 600-800KB)
-    const stat = fs.statSync(outputPath);
-    if (stat.size < 1000) {
-      console.warn(`[edit-transfer] HALD CLUT suspiciously small (${stat.size}B) — skipping CLUT`);
+    if (!result.success) {
+      console.warn(
+        `[edit-transfer] HALD CLUT generation failed: ${result.error}`
+      );
       return false;
     }
+
+    console.log(
+      `[edit-transfer] HALD CLUT generated: ${((result.outputSizeBytes ?? 0) / 1024).toFixed(0)}KB`
+    );
     return true;
   } catch (err) {
-    console.warn("[edit-transfer] HALD CLUT generation failed:", err instanceof Error ? err.message : err);
+    console.warn(
+      "[edit-transfer] HALD CLUT generation failed:",
+      err instanceof Error ? err.message : err
+    );
     return false;
   }
 }
@@ -889,14 +1108,14 @@ interface ResolvedSegment {
 
 function buildSetptsExpr(
   velocitySegments: VelocitySegment[],
-  targetDuration: number,
+  targetDuration: number
 ): string | null {
   if (!velocitySegments || velocitySegments.length === 0) return null;
 
   // ── Step 1: derive canonical single-loop pattern ────────────────────
   // Sort by start_sec and ensure contiguous coverage
   const canonical = [...velocitySegments].sort(
-    (a, b) => a.start_sec - b.start_sec,
+    (a, b) => a.start_sec - b.start_sec
   );
   const refEnd = Math.max(...canonical.map((s) => s.end_sec));
   if (refEnd <= 0) return null;
@@ -951,9 +1170,10 @@ function buildSetptsExpr(
     let cursor = 0;
     for (let i = 0; i < finalSegs.length; i += step) {
       const seg = finalSegs[i];
-      const end = (i + step < finalSegs.length)
-        ? finalSegs[i + step].inStart
-        : targetDuration;
+      const end =
+        i + step < finalSegs.length
+          ? finalSegs[i + step].inStart
+          : targetDuration;
       const dur = end - seg.inStart;
       decimated.push({
         inStart: seg.inStart,
@@ -1036,11 +1256,14 @@ function clampSpeed(speed: number): number {
 function buildDirectKeyframeSetpts(
   timeline: VelocityTimelinePoint[],
   targetDuration: number,
-  refDuration: number,
+  refDuration: number
 ): string | null {
   if (!timeline || timeline.length < 2) return null;
 
-  const refEnd = Math.max(refDuration, timeline[timeline.length - 1].time_sec + 0.01);
+  const refEnd = Math.max(
+    refDuration,
+    timeline[timeline.length - 1].time_sec + 0.01
+  );
   const scale = targetDuration / refEnd;
 
   // Build resolved segments from consecutive keyframe pairs.
@@ -1087,9 +1310,10 @@ function buildDirectKeyframeSetpts(
     let cursor = 0;
     for (let i = 0; i < keyframes.length; i += step) {
       const kf = keyframes[i];
-      const end = (i + step < keyframes.length)
-        ? keyframes[i + step].inStart
-        : targetDuration;
+      const end =
+        i + step < keyframes.length
+          ? keyframes[i + step].inStart
+          : targetDuration;
       const dur = end - kf.inStart;
       decimated.push({
         inStart: kf.inStart,
@@ -1136,7 +1360,7 @@ function buildDirectKeyframeZoomExpr(
   zoomTimeline: Array<{ time_sec: number; zoomSpeed: number }>,
   targetDuration: number,
   w: number,
-  h: number,
+  h: number
 ): string | null {
   if (zoomTimeline.length < 2) return null;
 
@@ -1228,7 +1452,7 @@ function buildDynamicZoomExpr(
   zoomTimeline: Array<{ time_sec: number; zoomSpeed: number }>,
   targetDuration: number,
   w: number,
-  h: number,
+  h: number
 ): string | null {
   if (zoomTimeline.length < 2) return null;
 
@@ -1268,11 +1492,15 @@ function buildDynamicZoomExpr(
   // Final region
   const lastSample = zoomTimeline[zoomTimeline.length - 1];
   const avgFinal = regSpeeds.reduce((a, b) => a + b, 0) / regSpeeds.length;
-  regions.push({ start: regStart, end: lastSample.time_sec, avgSpeed: avgFinal });
+  regions.push({
+    start: regStart,
+    end: lastSample.time_sec,
+    avgSpeed: avgFinal,
+  });
 
   // Filter out very short or very weak zoom regions
   const significant = regions.filter(
-    (r) => r.end - r.start > 0.15 && Math.abs(r.avgSpeed) > 0.05,
+    (r) => r.end - r.start > 0.15 && Math.abs(r.avgSpeed) > 0.05
   );
 
   if (significant.length === 0) return null;
@@ -1341,7 +1569,7 @@ function buildDynamicZoomExpr(
 function buildSignalColorDNA(
   sd: ShotDetectionResult,
   cg: ColorGradingResult,
-  _targetDuration: number,
+  _targetDuration: number
 ): string[] {
   const cuts = sd.cuts;
   if (!cuts || cuts.length === 0) return [];
@@ -1398,14 +1626,14 @@ function clampRange(value: number, min: number, max: number): number {
 function applyDTWAlignment(
   cutTimes: number[],
   beatEvents: BeatEvent[],
-  targetDuration: number,
+  targetDuration: number
 ): number[] {
   if (cutTimes.length < 3 || beatEvents.length === 0) return cutTimes;
 
   // Map each cut time to the nearest beat's intensity
   const intensities = cutTimes.map((t) => {
     let nearest = beatEvents[0];
-    let minDist = Infinity;
+    let minDist = Number.POSITIVE_INFINITY;
     for (const b of beatEvents) {
       // Use modulo to handle tiled beats
       const dist = Math.abs((b.timestamp_sec % targetDuration) - t);
@@ -1428,13 +1656,12 @@ function applyDTWAlignment(
     if (intensity >= strongThreshold) return t; // Strong: locked
 
     // Drift toward nearest strong beat
-    const maxDrift =
-      0.08 * (targetDuration / Math.max(1, cutTimes.length));
+    const maxDrift = 0.08 * (targetDuration / Math.max(1, cutTimes.length));
     const driftFactor =
       Math.max(0, 1 - intensity / Math.max(avgIntensity, 0.01)) * maxDrift;
 
     let nearestStrongTime = t;
-    let nearestDist = Infinity;
+    let nearestDist = Number.POSITIVE_INFINITY;
     for (let j = 0; j < cutTimes.length; j++) {
       if (
         intensities[j] >= strongThreshold &&
@@ -1501,7 +1728,7 @@ const MIN_CUT_GAP = 0.08;
 function buildShotOnlyCutPoints(
   hardCuts: ShotBoundary[],
   targetDuration: number,
-  refDuration: number,
+  refDuration: number
 ): number[] {
   if (hardCuts.length === 0) return [];
 
@@ -1519,12 +1746,12 @@ function buildShotOnlyCutPoints(
   if (rawCuts.length === 0) return [];
 
   // Sort and de-duplicate with MIN_CUT_GAP = 0.5s
-  const sorted = [...new Set(rawCuts.map((t) => parseFloat(t.toFixed(3))))].sort(
-    (a, b) => a - b,
-  );
+  const sorted = [
+    ...new Set(rawCuts.map((t) => Number.parseFloat(t.toFixed(3)))),
+  ].sort((a, b) => a - b);
 
   const deduped: number[] = [];
-  let lastCut = -Infinity;
+  let lastCut = Number.NEGATIVE_INFINITY;
 
   for (const t of sorted) {
     if (t - lastCut >= MIN_CUT_GAP) {
@@ -1547,7 +1774,7 @@ function buildBeatSyncedCutPoints(
   beatEvents: BeatEvent[],
   hardCuts: ShotBoundary[],
   targetDuration: number,
-  refDuration: number,
+  refDuration: number
 ): number[] {
   // Delegate to shot-only in v10.1
   return buildShotOnlyCutPoints(hardCuts, targetDuration, refDuration);
@@ -1604,14 +1831,31 @@ interface TransitionAssignment {
 function assignTransitionPresets(
   cutTimes: number[],
   beatEvents: BeatEvent[],
-  segments: Array<{ start: number; end: number }>,
+  segments: Array<{ start: number; end: number }>
 ): Array<TransitionAssignment | null> {
   // v10: Only subtle, non-flash transitions to avoid overexposure flicker.
   // "flash" and aggressive brightness spikes are REMOVED entirely.
   const refMatchedPresets: TransitionAssignment[] = [
-    { kind: "cross_blur", effectDurationSec: 0.08, intensity: 0.5, blurSigma: 6 },
-    { kind: "zoom_hit", effectDurationSec: 0.08, intensity: 0.6, scaleFrom: 1.0, scaleTo: 1.06 },
-    { kind: "zoom_out_hit", effectDurationSec: 0.08, intensity: 0.5, scaleFrom: 1.06, scaleTo: 1.0 },
+    {
+      kind: "cross_blur",
+      effectDurationSec: 0.08,
+      intensity: 0.5,
+      blurSigma: 6,
+    },
+    {
+      kind: "zoom_hit",
+      effectDurationSec: 0.08,
+      intensity: 0.6,
+      scaleFrom: 1.0,
+      scaleTo: 1.06,
+    },
+    {
+      kind: "zoom_out_hit",
+      effectDurationSec: 0.08,
+      intensity: 0.5,
+      scaleFrom: 1.06,
+      scaleTo: 1.0,
+    },
   ];
 
   const assignments: Array<TransitionAssignment | null> = [];
@@ -1628,7 +1872,7 @@ function assignTransitionPresets(
     // a reference beat with intensity ≥ 0.8 (strong structural beat).
     // All other cuts get a clean hard cut — no synthetic effects.
     let nearestBeat: BeatEvent | null = null;
-    let nearestDist = Infinity;
+    let nearestDist = Number.POSITIVE_INFINITY;
     for (const b of beatEvents) {
       const dist = Math.abs(b.timestamp_sec - cutTime);
       if (dist < nearestDist) {
@@ -1639,7 +1883,8 @@ function assignTransitionPresets(
 
     // Only apply a transition if the beat is very close (< 0.1s) AND
     // has high intensity — prevents synthetic flicker on weak beats
-    const isStrongRefBeat = nearestBeat && nearestDist < 0.1 && nearestBeat.intensity >= 0.8;
+    const isStrongRefBeat =
+      nearestBeat && nearestDist < 0.1 && nearestBeat.intensity >= 0.8;
 
     if (isStrongRefBeat) {
       // Cycle through subtle presets
@@ -1667,7 +1912,7 @@ function assignTransitionPresets(
  */
 function buildTransitionFilter(
   transition: TransitionAssignment,
-  segDuration: number,
+  segDuration: number
 ): string | null {
   const dur = Math.min(transition.effectDurationSec, segDuration * 0.3);
   if (dur < 0.02) return null;
@@ -1688,7 +1933,7 @@ function buildTransitionFilter(
       const scaleStart = (transition.scaleFrom ?? 1.15).toFixed(2);
       const frames = Math.round(dur * 30);
       // Linear interpolation from scaleStart to 1.0
-      return `zoompan=z='if(between(on,0,${frames}),${scaleStart}-${((parseFloat(scaleStart) - 1.0) / frames).toFixed(5)}*on,1)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=iw:ih:fps=30`;
+      return `zoompan=z='if(between(on,0,${frames}),${scaleStart}-${((Number.parseFloat(scaleStart) - 1.0) / frames).toFixed(5)}*on,1)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=iw:ih:fps=30`;
     }
 
     // ── Flash: REMOVED in v10 ────────────────────────────────────────

@@ -9,10 +9,11 @@ import { getCurrentUser } from "./users";
 export const getAllUsers = async () => {
   try {
     const authData = await getCurrentUser();
-    if (!authData) return { success: false, message: "Not authenticated.", users: [] };
+    if (!authData)
+      return { success: false, message: "Not authenticated.", users: [] };
     const { currentUser } = authData;
-    
-    if (currentUser.role !== 'admin') {
+
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Unauthorized. Admin access required.",
@@ -52,8 +53,8 @@ export const deleteUser = async (userId: string) => {
     const authData = await getCurrentUser();
     if (!authData) return { success: false, message: "Not authenticated." };
     const { currentUser } = authData;
-    
-    if (currentUser.role !== 'admin') {
+
+    if (currentUser.role !== "admin") {
       return {
         success: false,
         message: "Unauthorized. Admin access required.",
@@ -97,9 +98,7 @@ export const updateUserProfile = async (data: {
     if (data.name !== undefined) updateData.name = data.name;
     if (data.profilePhoto !== undefined) updateData.image = data.profilePhoto;
 
-    await db.update(user)
-      .set(updateData)
-      .where(eq(user.id, currentUser.id));
+    await db.update(user).set(updateData).where(eq(user.id, currentUser.id));
 
     return {
       success: true,

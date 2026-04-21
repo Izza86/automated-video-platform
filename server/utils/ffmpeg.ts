@@ -6,10 +6,10 @@
  */
 
 import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
+import { promisify } from "node:util";
 
 export const execAsync = promisify(exec);
 
@@ -23,7 +23,8 @@ export async function resolveFfmpeg(): Promise<string> {
   if (process.env.FFMPEG_PATH) candidates.push(process.env.FFMPEG_PATH);
   candidates.push("ffmpeg");
   if (process.platform === "win32") {
-    candidates.push("C:\\ffmpeg\\bin\\ffmpeg.exe");
+    // Removed hardcoded C: path — use PATH environment or FFMPEG_PATH instead
+    // This ensures compatibility with any drive (C:, D:, E:, etc.)
   } else {
     candidates.push("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg");
   }
@@ -33,7 +34,9 @@ export async function resolveFfmpeg(): Promise<string> {
       const cmd = /\\|\s/.test(c) ? `"${c}" -version` : `${c} -version`;
       await execAsync(cmd);
       return c;
-    } catch { /* next */ }
+    } catch {
+      /* next */
+    }
   }
   throw new Error("ffmpeg not found — install it or set FFMPEG_PATH");
 }
@@ -43,11 +46,14 @@ export async function resolveFfprobe(): Promise<string> {
   const candidates: string[] = [];
   if (process.env.FFPROBE_PATH) candidates.push(process.env.FFPROBE_PATH);
   if (process.env.FFMPEG_PATH) {
-    candidates.push(process.env.FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, "ffprobe$1"));
+    candidates.push(
+      process.env.FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, "ffprobe$1")
+    );
   }
   candidates.push("ffprobe");
   if (process.platform === "win32") {
-    candidates.push("C:\\ffmpeg\\bin\\ffprobe.exe");
+    // Removed hardcoded C: path — use PATH environment or FFPROBE_PATH instead
+    // This ensures compatibility with any drive (C:, D:, E:, etc.)
   } else {
     candidates.push("/usr/bin/ffprobe", "/usr/local/bin/ffprobe");
   }
@@ -57,7 +63,9 @@ export async function resolveFfprobe(): Promise<string> {
       const cmd = /\\|\s/.test(c) ? `"${c}" -version` : `${c} -version`;
       await execAsync(cmd);
       return c;
-    } catch { /* next */ }
+    } catch {
+      /* next */
+    }
   }
   throw new Error("ffprobe not found — install it or set FFPROBE_PATH");
 }
@@ -78,6 +86,7 @@ export interface ProbeResult {
   aspectRatio: string;
   hasAudio: boolean;
   duration: number;
+  frameCount: number;
   videoCodec: string;
   audioCodec: string | null;
 }
@@ -95,6 +104,7 @@ export async function probeVideo(videoPath: string): Promise<ProbeResult> {
   let aspectRatio = "16:9";
   let hasAudio = false;
   let duration = 0;
+  let frameCount = 0;
   let videoCodec = "unknown";
   let audioCodec: string | null = null;
 
@@ -110,11 +120,13 @@ export async function probeVideo(videoPath: string): Promise<ProbeResult> {
       if (s.display_aspect_ratio && s.display_aspect_ratio !== "0:1") {
         aspectRatio = s.display_aspect_ratio;
       } else {
-        const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+        const gcd = (a: number, b: number): number =>
+          b === 0 ? a : gcd(b, a % b);
         const g = gcd(width, height);
         aspectRatio = `${width / g}:${height / g}`;
       }
-      if (!duration && s.duration) duration = parseFloat(s.duration);
+      if (!duration && s.duration) duration = Number.parseFloat(s.duration);
+      if (s.nb_frames) frameCount = Number.parseInt(s.nb_frames, 10);
     }
     if (s.codec_type === "audio") {
       hasAudio = true;
@@ -122,10 +134,24 @@ export async function probeVideo(videoPath: string): Promise<ProbeResult> {
     }
   }
   if (!duration && data.format?.duration) {
-    duration = parseFloat(data.format.duration);
+    duration = Number.parseFloat(data.format.duration);
   }
 
-  return { fps, width, height, aspectRatio, hasAudio, duration, videoCodec, audioCodec };
+  if (!frameCount && duration > 0) {
+    frameCount = Math.round(duration * fps);
+  }
+
+  return {
+    fps,
+    width,
+    height,
+    aspectRatio,
+    hasAudio,
+    duration,
+    frameCount,
+    videoCodec,
+    audioCodec,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,7 +162,10 @@ const TEMP_ROOT = path.join(os.tmpdir(), "ave-modules");
 
 /** Create a namespaced temp directory and return its path. */
 export function makeTempDir(prefix: string): string {
-  const dir = path.join(TEMP_ROOT, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const dir = path.join(
+    TEMP_ROOT,
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  );
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -145,11 +174,17 @@ export function makeTempDir(prefix: string): string {
 export function cleanTempDir(dir: string): void {
   try {
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Write a Buffer to a temp file inside `dir`, return the path. */
-export async function writeTempFile(dir: string, name: string, data: Buffer): Promise<string> {
+export async function writeTempFile(
+  dir: string,
+  name: string,
+  data: Buffer
+): Promise<string> {
   const fp = path.join(dir, name);
   await fs.promises.writeFile(fp, data);
   return fp;
@@ -162,11 +197,19 @@ export async function writeTempFile(dir: string, name: string, data: Buffer): Pr
 /** Parse numeric values from an array of regex-match strings like "KEY=123.45". */
 export function parseMetricValues(matches: string[]): number[] {
   return matches
-    .map((m) => parseFloat(m.split("=")[1]))
+    .map((m) => Number.parseFloat(m.split("=")[1]))
     .filter((v) => !Number.isNaN(v));
 }
 
 /** Arithmetic mean of a number array (returns 0 for empty). */
 export function mean(arr: number[]): number {
   return arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+}
+
+/**
+ * Normalise a Windows absolute path to forward slashes + escape colons for FFmpeg.
+ * e.g. C:\path\file.txt -> C\:/path/file.txt
+ */
+export function fwdPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/:/g, "\\:");
 }

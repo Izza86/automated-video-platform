@@ -9,7 +9,7 @@ function required(name: string): string {
   if (!val || val.trim() === "") {
     throw new Error(
       `❌ Missing required environment variable: ${name}\n` +
-        `   → Add it to your .env file. See env.example for reference.`
+        "   → Add it to your .env file. See env.example for reference."
     );
   }
   return val;
@@ -42,7 +42,9 @@ export const env = {
   STRIPE_WEBHOOK_SECRET: optional("STRIPE_WEBHOOK_SECRET"),
   STRIPE_PRO_MONTHLY_PRICE_ID: optional("STRIPE_PRO_MONTHLY_PRICE_ID"),
   STRIPE_PRO_YEARLY_PRICE_ID: optional("STRIPE_PRO_YEARLY_PRICE_ID"),
-  STRIPE_BUSINESS_MONTHLY_PRICE_ID: optional("STRIPE_BUSINESS_MONTHLY_PRICE_ID"),
+  STRIPE_BUSINESS_MONTHLY_PRICE_ID: optional(
+    "STRIPE_BUSINESS_MONTHLY_PRICE_ID"
+  ),
   STRIPE_BUSINESS_YEARLY_PRICE_ID: optional("STRIPE_BUSINESS_YEARLY_PRICE_ID"),
 
   // Colab GPU
@@ -54,10 +56,17 @@ export const env = {
 
 // ── Public env (safe to use on client via NEXT_PUBLIC_ prefix) ────────────
 export const publicEnv = {
-  APP_URL: process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_URL || "http://localhost:3000",
+  APP_URL:
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.BETTER_AUTH_URL ||
+    "http://localhost:3000",
   STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
-  STRIPE_PRO_MONTHLY_PRICE_ID: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY_PRICE_ID || "",
-  STRIPE_PRO_YEARLY_PRICE_ID: process.env.NEXT_PUBLIC_STRIPE_PRO_YEARLY_PRICE_ID || "",
-  STRIPE_BUSINESS_MONTHLY_PRICE_ID: process.env.NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY_PRICE_ID || "",
-  STRIPE_BUSINESS_YEARLY_PRICE_ID: process.env.NEXT_PUBLIC_STRIPE_BUSINESS_YEARLY_PRICE_ID || "",
+  STRIPE_PRO_MONTHLY_PRICE_ID:
+    process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY_PRICE_ID || "",
+  STRIPE_PRO_YEARLY_PRICE_ID:
+    process.env.NEXT_PUBLIC_STRIPE_PRO_YEARLY_PRICE_ID || "",
+  STRIPE_BUSINESS_MONTHLY_PRICE_ID:
+    process.env.NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY_PRICE_ID || "",
+  STRIPE_BUSINESS_YEARLY_PRICE_ID:
+    process.env.NEXT_PUBLIC_STRIPE_BUSINESS_YEARLY_PRICE_ID || "",
 } as const;

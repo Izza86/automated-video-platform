@@ -39,8 +39,10 @@ os.system('pip install -q pyngrok')
 
 # TransNetV2 — install from GitHub (not available on PyPI)
 # This is the 3D DDCNN shot boundary detector; PySceneDetect is the fallback.
-os.system('pip install -q git+https://github.com/soCzech/TransNetV2.git 2>/dev/null '
-          '|| echo "⚠️  TransNetV2 install failed — PySceneDetect will be used instead"')
+print('\n⤷ Installing TransNetV2 from GitHub (may take ~30s)...')
+ret = os.system('pip install git+https://github.com/soCzech/TransNetV2.git')
+if ret != 0:
+    print('⚠️  TransNetV2 install returned non-zero exit code — it may not be available. PySceneDetect will be used instead.')
 
 print("\n✅ All packages installed!")
 
@@ -122,13 +124,34 @@ try:
 except Exception as e:
     print(f"⚠️  {e} (will try MiDaS fallback)")
 
+print("  → CLIP (openai/clip-vit-large-patch14)...", end=" ", flush=True)
+try:
+    from transformers import CLIPModel, AutoImageProcessor
+    clip_name = "openai/clip-vit-large-patch14"
+    _ = AutoImageProcessor.from_pretrained(clip_name)
+    _ = CLIPModel.from_pretrained(clip_name).eval()
+    print("✅")
+except Exception as e:
+    print(f"⚠️  CLIP preload failed: {e} — will try to initialize on first request")
+
 print("  → TransNetV2...", end=" ", flush=True)
 try:
     from transnetv2 import TransNetV2
     _ = TransNetV2()
     print("✅")
 except ImportError:
-    print("⚠️  Not installed — PySceneDetect will be used instead")
+    print("⚠️  Not installed — attempting to install TransNetV2 now...")
+    # Try installing once more in-case Cell 1's install failed silently
+    try:
+        ir = os.system('pip install git+https://github.com/soCzech/TransNetV2.git')
+        if ir == 0:
+            from transnetv2 import TransNetV2
+            _ = TransNetV2()
+            print("✅ (installed on retry)")
+        else:
+            print("⚠️  Install retry failed — PySceneDetect will be used instead")
+    except Exception as e:
+        print(f"⚠️  Retry failed: {e} — PySceneDetect will be used instead")
 except Exception as e:
     print(f"⚠️  {e}")
 

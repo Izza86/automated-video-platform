@@ -15,9 +15,12 @@
  * Response: JSON with analysis, blueprint, and edit instructions.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { analyzeAndGenerateInstructions } from "../../../../server/pipeline/orchestrator";
-import type { BlueprintTransferOptions, AdaptationStrategy } from "../../../../server/types";
+import type {
+  AdaptationStrategy,
+  BlueprintTransferOptions,
+} from "../../../../server/types";
 
 const VALID_STRATEGIES = new Set<AdaptationStrategy>([
   "proportional",
@@ -32,16 +35,16 @@ export async function POST(req: NextRequest) {
     const referenceFile = form.get("reference");
     const targetFile = form.get("target");
 
-    if (!referenceFile || !(referenceFile instanceof File)) {
+    if (!(referenceFile && referenceFile instanceof File)) {
       return NextResponse.json(
         { error: "Missing 'reference' file in form data." },
-        { status: 400 },
+        { status: 400 }
       );
     }
-    if (!targetFile || !(targetFile instanceof File)) {
+    if (!(targetFile && targetFile instanceof File)) {
       return NextResponse.json(
         { error: "Missing 'target' file in form data." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -52,7 +55,10 @@ export async function POST(req: NextRequest) {
     const opts: BlueprintTransferOptions = {};
 
     const strategyField = form.get("strategy");
-    if (typeof strategyField === "string" && VALID_STRATEGIES.has(strategyField as AdaptationStrategy)) {
+    if (
+      typeof strategyField === "string" &&
+      VALID_STRATEGIES.has(strategyField as AdaptationStrategy)
+    ) {
       opts.strategy = strategyField as AdaptationStrategy;
     }
 
@@ -68,11 +74,7 @@ export async function POST(req: NextRequest) {
 
     // Run the full pipeline: analysis → blueprint → transfer
     const { analysis, blueprint, instructions } =
-      await analyzeAndGenerateInstructions(
-        referenceBuffer,
-        targetBuffer,
-        opts,
-      );
+      await analyzeAndGenerateInstructions(referenceBuffer, targetBuffer, opts);
 
     // ── Payload-size guard ──────────────────────────────────────────
     // Strip any fields that could push the JSON past the ~1 MB
@@ -110,7 +112,7 @@ export async function POST(req: NextRequest) {
     console.error("[/api/editor/blueprint-transfer] Error:", message);
     return NextResponse.json(
       { success: false, error: message },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

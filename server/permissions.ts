@@ -1,7 +1,7 @@
 "use server";
 
-import { getCurrentUser } from "@/server/users";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { getCurrentUser } from "@/server/users";
 
 /**
  * Check whether the current session user is an admin.
