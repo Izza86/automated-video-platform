@@ -82,8 +82,8 @@ try {
   // Keep _db as null; callers should use `getDb()` which will throw
 }
 
-/** Exported `db` may be null if initialization failed — prefer `getDb()` */
-export const db = _db as unknown as ReturnType<typeof drizzle> | null;
+/** Exported `db` — asserted as non-null for type safety */
+export const db = _db!;
 
 /**
  * Get the initialized `db` instance or throw a clear, actionable error.

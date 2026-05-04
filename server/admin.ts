@@ -3,6 +3,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import { user } from "@/db/schema";
+import type { User } from "@/db/schema";
 import { getCurrentUser } from "./users";
 
 // Get all users (Admin only)
@@ -21,17 +22,18 @@ export const getAllUsers = async () => {
       };
     }
 
-    const users = await db.query.user.findMany({
-      columns: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        emailVerified: true,
-        createdAt: true,
-        image: true,
-      },
-    });
+    const users = await db.select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      emailVerified: user.emailVerified,
+      createdAt: user.createdAt,
+      image: user.image,
+      profilePhoto: user.profilePhoto,
+      stripeCustomerId: user.stripeCustomerId,
+      updatedAt: user.updatedAt,
+    }).from(user) as User[];
 
     return {
       success: true,

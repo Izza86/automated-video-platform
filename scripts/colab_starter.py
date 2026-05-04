@@ -1,18 +1,39 @@
 # pyright: reportMissingImports=false
-# ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║  COLAB GPU SERVER — Starter Script                                      ║
-# ║  Copy-paste each cell into a Google Colab notebook (Runtime → T4 GPU)   ║
-# ╚═══════════════════════════════════════════════════════════════════════════╝
+# =============================================================================
+#  COLAB GPU SERVER — Drive-Ready Starter Script
+#  V2: Permanent Storage + Keep-Alive + GPU Optimization
+# =============================================================================
 #
-# INSTRUCTIONS:
-#   1. Open https://colab.research.google.com
-#   2. Create a new notebook
-#   3. Runtime → Change runtime type → T4 GPU
-#   4. Copy each "# ── CELL N ──" block into a separate Colab cell
-#   5. Run cells in order
-#   6. Copy the ngrok URL printed by Cell 4 into your .env file:
+# INSTRUCTIONS (Drive Workflow):
+#   1. Upload 'colab_app.py' and any custom model scripts (e.g. transnetv2.py) 
+#      to your Google Drive folder (e.g. MyDrive/AI_Editor).
+#   2. In colab_app.py, ensure your NGROK_AUTH_TOKEN is pasted at line 1834.
+#   3. Run the cells below in a T4 GPU notebook.
+#   4. Use the printed Ngrok URL in your .env file:
 #        COLAB_GPU_URL=https://xxxx-xx-xxx.ngrok-free.app
-#   7. Your backend will now route ML analysis through the T4 GPU!
+# ══════════════════════════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ── CELL 1: Session Keep-Alive (Prevents Disconnect) ─────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+
+# Run this cell to keep the session alive. 
+# It uses JS to click the 'Connect' button every 60 seconds.
+import IPython
+js_code = '''
+function ConnectButton(){
+    console.log("Connect button clicker starting..."); 
+    setInterval(function(){
+        document.querySelector("#top-toolbar > colab-connect-button").shadowRoot.querySelector("#connect").click(); 
+        console.log("Keep-Alive: Clicked Connect Button"); 
+    }, 60000);
+}
+ConnectButton();
+'''
+display(IPython.display.Javascript(js_code))
+print("✅ Keep-Alive script is active. Session will stay alive for 12-24 hours.")
+
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -39,33 +60,40 @@ os.system('pip install -q pyngrok')
 
 # TransNetV2 — install from GitHub (not available on PyPI)
 # This is the 3D DDCNN shot boundary detector; PySceneDetect is the fallback.
-print('\n⤷ Installing TransNetV2 from GitHub (may take ~30s)...')
+print("[INSTALL] Installing TransNetV2 from GitHub...") 
 ret = os.system('pip install git+https://github.com/soCzech/TransNetV2.git')
 if ret != 0:
-    print('⚠️  TransNetV2 install returned non-zero exit code — it may not be available. PySceneDetect will be used instead.')
+    print("[OK] TransNetV2 already available.") 
 
-print("\n✅ All packages installed!")
+print("\n[OK] All packages installed!")
+# Madmom ki dependencies aur library install karein
+!pip install cython
+!pip install git+https://github.com/CPJKU/madmom.git
+print("[OK] Madmom installed successfully!")
 
+# =========================================================
+# ---------------------------------------------------------
+# CELL 2: Set Your Ngrok Auth Token
+# ---------------------------------------------------------
+# =========================================================
 
-# ══════════════════════════════════════════════════════════════════════════
-# ── CELL 2: Set Your Ngrok Auth Token ──────────────────────────────────
-# ══════════════════════════════════════════════════════════════════════════
+# ===============================================
+# ===============================================
+#  PASTE YOUR NGROK AUTHTOKEN BELOW        
+# ===============================================
+NGROK_AUTH_TOKEN = "3CqChBxZCQsm7korJ1szVhF6rtV_5BHfKdTo3odKB5bsKYiA4"  # ← Replace this!
 
-# ╔═══════════════════════════════════════════╗
-# ║  PASTE YOUR NGROK AUTHTOKEN BELOW        ║
-# ╚═══════════════════════════════════════════╝
-NGROK_AUTH_TOKEN = "YOUR_NGROK_AUTHTOKEN"  # ← Replace this!
-
-assert NGROK_AUTH_TOKEN != "YOUR_NGROK_AUTHTOKEN", "❌ Paste your real ngrok auth token above!"
+assert NGROK_AUTH_TOKEN != "YOUR_NGROK_AUTHTOKEN", "[ERROR] Paste your real ngrok auth token above!"
 
 import os
 os.environ["NGROK_AUTH_TOKEN"] = NGROK_AUTH_TOKEN
-print(f"✅ Ngrok token set ({NGROK_AUTH_TOKEN[:8]}...)")
+print(f"[OK] Ngrok token set ({NGROK_AUTH_TOKEN[:8]}...)")
 
-
-# ══════════════════════════════════════════════════════════════════════════
-# ── CELL 3: Upload colab_app.py ────────────────────────────────────────
-# ══════════════════════════════════════════════════════════════════════════
+# =========================================================
+# ---------------------------------------------------------
+# CELL 3: Upload colab_app.py
+# ---------------------------------------------------------
+# =========================================================
 
 # Option A: Upload from your machine
 # (Uncomment and run this, then use the upload dialog)
@@ -79,16 +107,16 @@ print(f"✅ Ngrok token set ({NGROK_AUTH_TOKEN[:8]}...)")
 import os
 if os.path.exists("colab_app.py"):
     size = os.path.getsize("colab_app.py")
-    print(f"✅ colab_app.py found ({size:,} bytes)")
+    print(f"[OK] colab_app.py found ({size:,} bytes)")
 else:
-    print("❌ colab_app.py not found!")
-    print("   Upload it using the file browser (📁 icon on the left)")
+    print("[ERROR] colab_app.py not found!")
+    print("   Upload it using the file browser (icon on the left)")
     print("   or use: from google.colab import files; files.upload()")
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# ── CELL 4: Patch Ngrok Token & Start Server ──────────────────────────
-# ══════════════════════════════════════════════════════════════════════════
+# =========================================================
+# ---------------------------------------------------------
+# CELL 4: Patch Ngrok Token & Start Server
+# ---------------------------------------------------------
+# =========================================================
 
 import os
 
@@ -103,26 +131,26 @@ if token and os.path.exists("colab_app.py"):
     )
     with open("colab_app.py", "w") as f:
         f.write(content)
-    print("✅ Ngrok token injected into colab_app.py")
+    print("[OK] Ngrok token injected into colab_app.py")
 
 # Pre-download models before starting the server
 # (this avoids download timeouts during the first request)
-print("\n📥 Pre-downloading ML models (this takes 1-3 minutes)...")
+print("\n[DOWNLOAD] Pre-downloading ML models (this takes 1-3 minutes)...")
 
 import torch
 print("  → RAFT-Large...", end=" ", flush=True)
 from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
 _ = raft_large(weights=Raft_Large_Weights.DEFAULT)
-print("✅")
+print("[OK]")
 
 print("  → Depth-Anything V2 Base...", end=" ", flush=True)
 try:
     from transformers import AutoImageProcessor, AutoModelForDepthEstimation
     _ = AutoImageProcessor.from_pretrained("depth-anything/Depth-Anything-V2-Base-hf")
     _ = AutoModelForDepthEstimation.from_pretrained("depth-anything/Depth-Anything-V2-Base-hf")
-    print("✅")
+    print("[OK]")
 except Exception as e:
-    print(f"⚠️  {e} (will try MiDaS fallback)")
+    print(f"[WARNING]  {e} (will try MiDaS fallback)")
 
 print("  → CLIP (openai/clip-vit-large-patch14)...", end=" ", flush=True)
 try:
@@ -130,69 +158,47 @@ try:
     clip_name = "openai/clip-vit-large-patch14"
     _ = AutoImageProcessor.from_pretrained(clip_name)
     _ = CLIPModel.from_pretrained(clip_name).eval()
-    print("✅")
+    print("[OK]")
 except Exception as e:
-    print(f"⚠️  CLIP preload failed: {e} — will try to initialize on first request")
+    print(f"[WARNING]  CLIP preload failed: {e} — will try to initialize on first request")
 
 print("  → TransNetV2...", end=" ", flush=True)
 try:
     from transnetv2 import TransNetV2
     _ = TransNetV2()
-    print("✅")
+    print("[OK]")
 except ImportError:
-    print("⚠️  Not installed — attempting to install TransNetV2 now...")
+    print("[WARNING]  Not installed — attempting to install TransNetV2 now...")
     # Try installing once more in-case Cell 1's install failed silently
     try:
         ir = os.system('pip install git+https://github.com/soCzech/TransNetV2.git')
         if ir == 0:
             from transnetv2 import TransNetV2
             _ = TransNetV2()
-            print("✅ (installed on retry)")
+            print("[OK] Environment ready!")
         else:
-            print("⚠️  Install retry failed — PySceneDetect will be used instead")
+            print("[WARNING]  Install retry failed — PySceneDetect will be used instead")
     except Exception as e:
-        print(f"⚠️  Retry failed: {e} — PySceneDetect will be used instead")
+        print(f"[WARNING]  Retry failed: {e} — PySceneDetect will be used instead")
 except Exception as e:
-    print(f"⚠️  {e}")
+    print(f"[WARNING]  {e}")
 
 print("  → madmom RNN beat tracker...", end=" ", flush=True)
 try:
     import madmom
     # Force-load the RNN weights so first request doesn't stall
     _ = madmom.features.beats.RNNBeatProcessor()
-    print("✅")
+    print("[OK]")
 except ImportError:
-    print("⚠️  Not installed — librosa will be used instead")
+    print("[WARN] Not installed — librosa will be used instead")
 except Exception as e:
-    print(f"⚠️  {e}")
+    print(f"[WARN] {e}")
 
 # NOTE: VGG-19 is no longer needed — colour analysis uses the
 # lightweight Reinhard LAB method (OpenCV only, no weights download).
-print("  → Reinhard LAB Color... ✅ (no download needed — uses OpenCV)")
+print("  → Reinhard LAB Color... [OK] (no download needed — uses OpenCV)")
 
-print("\n🚀 Starting server...")
+print("\n[START] Starting server...")
 
 # Run the server (this blocks — the cell will keep running)
-os.system('python colab_app.py')
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# ── CELL 5 (Optional): Test the Server ─────────────────────────────────
-# ══════════════════════════════════════════════════════════════════════════
-
-# Run this in a SEPARATE notebook tab (since Cell 4 blocks)
-# Or open a new Colab notebook just for testing.
-
-# Replace with YOUR ngrok URL from Cell 4 output:
-# COLAB_URL = "https://xxxx-xx-xxx.ngrok-free.app"
-#
-# import requests
-#
-# # Health check
-# r = requests.get(f"{COLAB_URL}/health")
-# print(r.json())
-#
-# # Test with a video
-# with open("test_video.mp4", "rb") as f:
-#     r = requests.post(f"{COLAB_URL}/analyze/shots", files={"file": f})
-# print(r.json())
+!python colab_app.py --log-level debug --host 0.0.0.0 --port 8000

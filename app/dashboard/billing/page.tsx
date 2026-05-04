@@ -160,7 +160,7 @@ export default function BillingPage() {
           </p>
         </div>
 
-        <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/10 to-pink-900/10">
+        <Card className="border-purple-500/30 bg-gradient-to-br from-purple-900/20 via-fuchsia-900/20 to-pink-900/20 shadow-lg shadow-purple-500/10">
           <CardHeader>
             <CardTitle className="text-purple-400">
               No Active Subscription
@@ -203,7 +203,7 @@ export default function BillingPage() {
       </div>
 
       {/* Current Plan */}
-      <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
+      <Card className="border-purple-500/30 bg-gradient-to-br from-purple-900/15 via-fuchsia-900/15 to-pink-900/15 shadow-lg shadow-purple-500/10">
         <CardHeader>
           <div className="flex items-start justify-between">
             <div>
@@ -281,7 +281,7 @@ export default function BillingPage() {
       </Card>
 
       {/* Usage */}
-      <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
+      <Card className="border-purple-500/30 bg-gradient-to-br from-purple-900/15 via-fuchsia-900/15 to-pink-900/15 shadow-lg shadow-purple-500/10">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-purple-600" />
@@ -326,7 +326,7 @@ export default function BillingPage() {
       </Card>
 
       {/* Payment Method */}
-      <Card className="border-purple-500/20 bg-gradient-to-br from-purple-900/5 to-pink-900/5">
+      <Card className="border-purple-500/30 bg-gradient-to-br from-purple-900/15 via-fuchsia-900/15 to-pink-900/15 shadow-lg shadow-purple-500/10">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5 text-purple-600" />

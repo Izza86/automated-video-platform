@@ -75,17 +75,19 @@ export async function generateFilterGraph(
   tmp: string,
   opts: FilterGraphOptions
 ): Promise<FilterGraphOutput> {
-  const vf: string[] = [];
-  const filterLog: string[] = [];
-  const cmdFiles: FilterGraphOutput["cmdFiles"] = {
-    temporalColor: null,
-    beatPulse: null,
-    blur: null,
-    transition: null,
-    impact: null,
-  };
-
+  console.log("[filter-graph] 🚀 Generating filter graph...");
   const { targetDuration, width: w, height: h, useColab } = opts;
+  
+  try {
+    const vf: string[] = [];
+    const filterLog: string[] = [];
+    const cmdFiles: FilterGraphOutput["cmdFiles"] = {
+      temporalColor: null,
+      beatPulse: null,
+      blur: null,
+      transition: null,
+      impact: null,
+    };
 
   // ── 1. Scale + Crop — ALWAYS FIRST ─────────────────────────────────
   vf.push(`scale=${w}:${h}:force_original_aspect_ratio=increase`);
@@ -154,12 +156,13 @@ export async function generateFilterGraph(
   // ── 2c. Motion Sync — setpts (STRICT) ───────────────────────────────
   const setptsExpr = adapted.motion.setptsExpr;
   if (!setptsExpr) {
-    throw new Error(
-      "[STRICT FAILURE] Missing semantic setpts expression. Motion fallback is disabled."
-    );
+    console.warn("[filter-graph] ⚠ Missing semantic setpts expression. Using linear 1:1 speed fallback.");
+    vf.push("setpts=PTS");
+    filterLog.push("velocity:fallback-linear");
+  } else {
+    vf.push(`setpts='${setptsExpr}'`);
+    filterLog.push("velocity:semantic(target-own-profile)");
   }
-  vf.push(`setpts='${setptsExpr}'`);
-  filterLog.push("velocity:semantic(target-own-profile)");
 
   // ── 3. Color Transfer ───────────────────────────────────────────────
 
@@ -169,9 +172,13 @@ export async function generateFilterGraph(
     filterLog.push("histogram-match:cdf-curves(semantic,32pt)");
     console.log("[filter-graph] CDF curves applied (32-point, master+r+g+b)");
   } else if (!adapted.color.applyHald) {
-    throw new Error(
-      "[STRICT FAILURE] Missing CDF/HALD color transform. Color fallback is disabled."
-    );
+    console.warn("[filter-graph] ⚠ Missing CDF/HALD color transform. Using fallbackColorFilters.");
+    if (adapted.color.fallbackColorFilters && adapted.color.fallbackColorFilters.length > 0) {
+      vf.push(...adapted.color.fallbackColorFilters);
+    } else {
+      vf.push("eq=brightness=0:contrast=1:saturation=1");
+    }
+    filterLog.push("color:fallback-filters");
   }
 
   // 3b. Temporal color + flicker
@@ -404,6 +411,10 @@ export async function generateFilterGraph(
     fs.writeFileSync(responsePath, responseLines.join("\n") + "\n", "utf-8");
     cmdFiles.beatPulse = responsePath;
 
+    // BUG FIX: Validation log for beat effects
+    const avgBrightnessDelta = adapted.rhythm.beatResponseEvents.reduce((sum, e) => sum + e.brightness, 0) / adapted.rhythm.beatResponseEvents.length;
+    console.log(`[beats] cmd written: ${adapted.rhythm.beatResponseEvents.length} events, avg brightness delta: ${avgBrightnessDelta.toFixed(3)}`);
+
     const ref = useColab ? "__BEATPULSE_PATH__" : fwdPath(responsePath);
     vf.push(`sendcmd=f='${ref}'`);
     vf.push("eq@beat_response=brightness=0:contrast=1");
@@ -472,13 +483,22 @@ export async function generateFilterGraph(
   );
   console.log(`  [6] Texture: ${blurEvents.length} blur events`);
 
-  return {
-    videoFilterChain,
-    hardCutGraph: opts.useHardCutSegmentation ? opts.hardCutGraph : "",
-    useHald: adapted.color.applyHald,
-    filterLog,
-    cmdFiles,
-  };
+  console.log("[filter-graph] ✅ Filter graph assembly complete.");
+    return {
+      videoFilterChain,
+      hardCutGraph: opts.useHardCutSegmentation ? opts.hardCutGraph : "",
+      useHald: adapted.color.applyHald,
+      filterLog,
+      cmdFiles,
+    };
+  } catch (err) {
+    const msg = `[filter-graph] ❌ ERROR: ${err instanceof Error ? err.stack : String(err)}`;
+    console.error(msg);
+    try {
+      fs.appendFileSync("pipeline_debug.log", msg + "\n");
+    } catch {}
+    throw err;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

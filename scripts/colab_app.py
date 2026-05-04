@@ -1831,7 +1831,7 @@ def start_server():
         # ╔═══════════════════════════════════════════════════════════╗
         # ║  PASTE YOUR NGROK AUTHTOKEN BELOW                       ║
         # ╚═══════════════════════════════════════════════════════════╝
-        NGROK_AUTH_TOKEN = "YOUR_NGROK_AUTHTOKEN"
+        NGROK_AUTH_TOKEN = "3CqChBxZCQsm7korJ1szVhF6rtV_5BHfKdTo3odKB5bsKYiA4"
 
         ngrok.set_auth_token(NGROK_AUTH_TOKEN)
         tunnel = ngrok.connect(PORT, "http")

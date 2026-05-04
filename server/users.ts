@@ -18,9 +18,8 @@ export const getCurrentUser = async () => {
       redirect("/login");
     }
 
-    const currentUser = await db.query.user.findFirst({
-      where: eq(user.id, session.user.id),
-    });
+    const currentUserResult = await db.select().from(user).where(eq(user.id, session.user.id)).limit(1);
+    const currentUser = currentUserResult[0];
 
     if (!currentUser) {
       redirect("/login");
@@ -93,17 +92,18 @@ export const getAllUsers = async () => {
       };
     }
 
-    const allUsers = await db.query.user.findMany({
-      columns: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        emailVerified: true,
-        createdAt: true,
-        image: true,
-      },
-    });
+    const allUsers = await db.select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      emailVerified: user.emailVerified,
+      createdAt: user.createdAt,
+      image: user.image,
+      profilePhoto: user.profilePhoto,
+      stripeCustomerId: user.stripeCustomerId,
+      updatedAt: user.updatedAt,
+    }).from(user);
 
     return {
       success: true,
@@ -196,9 +196,8 @@ export const updateUserByAdmin = async (
     }
 
     // Check if email is already taken by another user
-    const existingUser = await db.query.user.findFirst({
-      where: eq(user.email, email),
-    });
+    const existingUserResult = await db.select().from(user).where(eq(user.email, email)).limit(1);
+    const existingUser = existingUserResult[0] || null;
 
     if (existingUser && existingUser.id !== userId) {
       return {
@@ -285,9 +284,8 @@ export const sendEmailToUser = async (
       };
     }
 
-    const targetUser = await db.query.user.findFirst({
-      where: eq(user.id, userId),
-    });
+    const targetUserResult = await db.select().from(user).where(eq(user.id, userId)).limit(1);
+    const targetUser = targetUserResult[0];
 
     if (!targetUser) {
       return {
@@ -360,9 +358,8 @@ export const addNewUser = async (
     }
 
     // Check if user already exists
-    const existingUser = await db.query.user.findFirst({
-      where: eq(user.email, email),
-    });
+    const existingUserResult = await db.select().from(user).where(eq(user.email, email)).limit(1);
+    const existingUser = existingUserResult[0] || null;
 
     if (existingUser) {
       return {
@@ -382,9 +379,8 @@ export const addNewUser = async (
 
     // Update role if not default user
     if (role !== "user") {
-      const newUser = await db.query.user.findFirst({
-        where: eq(user.email, email),
-      });
+      const newUserResult = await db.select().from(user).where(eq(user.email, email)).limit(1);
+      const newUser = newUserResult[0];
 
       if (newUser) {
         await db

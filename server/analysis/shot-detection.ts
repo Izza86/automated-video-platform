@@ -59,15 +59,19 @@ export async function detectShots(
       120_000 // 120s timeout
     );
 
+    // Accept result if ML ran successfully (shotCount >= 1 means at least
+    // one shot segment was identified — even single-shot videos return 1).
+    // Both TransNetV2 and classical histogram (hist-chisqr) are legitimate
+    // ML/CV techniques and should not be rejected.
     if (
       mlResult &&
       !mlResult.error &&
-      mlResult.shots &&
-      mlResult.shots.length > 0
+      mlResult.shotCount >= 1
     ) {
+      const model = mlResult.mlModel ?? "unknown";
       console.log(
         `[shot-detect] ML shot detection succeeded: ${mlResult.shotCount} shots, ` +
-          `${mlResult.cutCount} cuts, ${mlResult.gradualCount} gradual, model=${mlResult.mlModel}`
+          `${mlResult.cutCount ?? 0} cuts, ${mlResult.gradualCount ?? 0} gradual, model=${model}`
       );
 
       const mlCuts: ShotBoundary[] = (mlResult.boundaries ?? []).map((b) => ({
@@ -83,9 +87,9 @@ export async function detectShots(
       }));
 
       const shotCount = mlResult.shotCount;
-      const avgDur = mlResult.avgShotDuration;
-      const hardCuts = mlResult.cutCount;
-      const gradualCuts = mlResult.gradualCount;
+      const avgDur = mlResult.avgShotDuration ?? 0;
+      const hardCuts = mlResult.cutCount ?? 0;
+      const gradualCuts = mlResult.gradualCount ?? 0;
 
       const pace: ShotDetectionResult["editingPace"] =
         avgDur < 1.5 ? "rapid" : avgDur < 5 ? "moderate" : "slow";

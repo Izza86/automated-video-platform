@@ -361,13 +361,13 @@ export function LampAnimation({
             />
           </div>
 
-          {/* Pull cord */}
-          <div className="-bottom-3 -translate-x-1/2 absolute left-1/2 flex flex-col items-center">
+          {/* Pull cord — hanging from INSIDE the lamp shade */}
+          <div className="-bottom-2 -translate-x-1/2 absolute left-1/2 flex flex-col items-center">
             <div
               className={cn(
-                "w-px transition-all duration-200",
-                isPulling ? "h-16" : "h-12",
-                isOn ? "bg-amber-300/70" : "bg-gray-400"
+                "w-px transition-all duration-200 origin-top",
+                isPulling ? "h-24" : "h-20",
+                isOn ? "bg-cyan-300/70" : "bg-gray-400"
               )}
             />
             <button
@@ -375,14 +375,14 @@ export function LampAnimation({
               className={cn(
                 "group relative h-4 w-4 cursor-pointer rounded-full transition-all duration-300 hover:scale-[1.6]",
                 isOn
-                  ? "bg-gradient-to-b from-amber-200 to-amber-500 shadow-[0_0_12px_rgba(255,200,0,0.6)]"
+                  ? "bg-gradient-to-b from-cyan-200 to-cyan-500 shadow-[0_0_12px_rgba(34,211,238,0.8)]"
                   : "bg-gradient-to-b from-gray-200 to-gray-500 shadow-md",
-                isPulling && "translate-y-4 scale-125"
+                isPulling && "translate-y-6 scale-125"
               )}
               onClick={toggleLamp}
             >
               {!isOn && (
-                <span className="-translate-x-1/2 lamp-pull-bounce pointer-events-none absolute top-6 left-1/2 whitespace-nowrap font-bold text-[10px] text-amber-300 opacity-0 transition-opacity group-hover:opacity-100">
+                <span className="-translate-x-1/2 lamp-pull-bounce pointer-events-none absolute top-6 left-1/2 whitespace-nowrap font-bold text-[10px] text-cyan-300 opacity-0 transition-opacity group-hover:opacity-100">
                   ↓ Pull
                 </span>
               )}

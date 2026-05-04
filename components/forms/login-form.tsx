@@ -23,6 +23,16 @@ import { cn } from "@/lib/utils";
 import { signIn } from "@/server/users";
 import { Badge } from "../ui/badge";
 
+// Deep Violet & Soft Lavender Color Palette
+const COLORS = {
+  deepIndigo: "#2E1A47",
+  richViolet: "#4B0082",
+  lavenderMist: "#E6E6FA",
+  softLavender: "#D8BFD8",
+  marigold: "#F4C430",
+  goldenYellow: "#FFD700",
+};
+
 const formSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -81,9 +91,13 @@ export function LoginForm({
           <div className="grid gap-6">
             {/* Google Login Button */}
             <Button
-              className="relative h-12 w-full transform bg-white font-semibold text-gray-900 shadow-lg transition-all duration-300 hover:scale-[1.02] hover:bg-gray-100 hover:shadow-xl"
+              className="relative h-12 w-full transform font-semibold shadow-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-xl"
               onClick={signInWithGoogle}
               type="button"
+              style={{ 
+                background: COLORS.lavenderMist,
+                color: COLORS.deepIndigo,
+              }}
             >
               <svg
                 className="mr-2 h-5 w-5"
@@ -97,7 +111,10 @@ export function LoginForm({
               </svg>
               Login with Google
               {lastMethod === "google" && (
-                <Badge className="absolute right-2 bg-purple-600 text-[9px]">
+                <Badge 
+                  className="absolute right-2 text-[9px] border-0"
+                  style={{ background: COLORS.marigold, color: COLORS.deepIndigo }}
+                >
                   last used
                 </Badge>
               )}
@@ -106,10 +123,16 @@ export function LoginForm({
             {/* Divider */}
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-purple-500/30 border-t" />
+                <span 
+                  className="w-full border-t"
+                  style={{ borderColor: `${COLORS.lavenderMist}30` }}
+                />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-transparent px-2 text-purple-300">
+                <span 
+                  className="bg-transparent px-2"
+                  style={{ color: COLORS.softLavender }}
+                >
                   Or continue with
                 </span>
               </div>
@@ -122,17 +145,24 @@ export function LoginForm({
               render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between">
-                    <FormLabel className="text-white">Email</FormLabel>
+                    <FormLabel style={{ color: COLORS.lavenderMist }}>Email</FormLabel>
                     {lastMethod === "email" && (
-                      <Badge className="bg-purple-600 text-[9px]">
+                      <Badge 
+                        className="text-[9px] border-0"
+                        style={{ background: COLORS.marigold, color: COLORS.deepIndigo }}
+                      >
                         last used
                       </Badge>
                     )}
                   </div>
                   <FormControl>
                     <Input
-                      className="h-12 border-purple-500/50 bg-black/30 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/30"
+                      className="h-12 text-white placeholder:text-white/40"
                       placeholder="you@example.com"
+                      style={{ 
+                        background: `${COLORS.deepIndigo}50`,
+                        borderColor: `${COLORS.lavenderMist}40`,
+                      }}
                       {...field}
                     />
                   </FormControl>
@@ -148,9 +178,10 @@ export function LoginForm({
               render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between">
-                    <FormLabel className="text-white">Password</FormLabel>
+                    <FormLabel style={{ color: COLORS.lavenderMist }}>Password</FormLabel>
                     <Link
-                      className="text-purple-300 text-sm underline-offset-4 transition-colors hover:text-purple-200 hover:underline"
+                      className="text-sm underline-offset-4 transition-colors hover:underline"
+                      style={{ color: COLORS.softLavender }}
                       href="/forgot-password"
                     >
                       Forgot?
@@ -159,9 +190,13 @@ export function LoginForm({
                   <FormControl>
                     <div className="relative">
                       <Input
-                        className="h-12 border-purple-500/50 bg-black/30 pr-12 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/30"
+                        className="h-12 pr-12 text-white placeholder:text-white/40"
                         placeholder="••••••••"
                         type={showPassword ? "text" : "password"}
+                        style={{ 
+                          background: `${COLORS.deepIndigo}50`,
+                          borderColor: `${COLORS.lavenderMist}40`,
+                        }}
                         {...field}
                       />
                       <button
@@ -184,10 +219,14 @@ export function LoginForm({
 
             {/* Submit Button */}
             <Button
-              className="h-12 w-full transform bg-gradient-to-r from-purple-600 to-pink-600 font-bold text-white shadow-xl transition-all duration-300 hover:scale-[1.02] hover:from-purple-500 hover:to-pink-500 hover:shadow-2xl"
+              className="h-12 w-full transform font-bold text-white shadow-xl transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl border-0"
               data-prefetch="/dashboard"
               disabled={isLoading}
               type="submit"
+              style={{ 
+                background: `linear-gradient(135deg, ${COLORS.deepIndigo} 0%, ${COLORS.richViolet} 100%)`,
+                boxShadow: `0 10px 25px -5px ${COLORS.deepIndigo}80`,
+              }}
             >
               {isLoading ? (
                 <>
@@ -200,10 +239,14 @@ export function LoginForm({
             </Button>
 
             {/* Signup Link */}
-            <div className="text-center text-purple-200 text-sm">
+            <div 
+              className="text-center text-sm"
+              style={{ color: COLORS.softLavender }}
+            >
               Don't have an account?{" "}
               <Link
-                className="font-semibold text-white underline underline-offset-4 transition-colors hover:text-purple-300"
+                className="font-semibold underline underline-offset-4 transition-colors"
+                style={{ color: COLORS.lavenderMist }}
                 href="/signup"
               >
                 Sign up here
@@ -214,17 +257,22 @@ export function LoginForm({
       </Form>
 
       {/* Terms */}
-      <div className="text-center text-purple-300/70 text-xs">
+      <div 
+        className="text-center text-xs"
+        style={{ color: `${COLORS.lavenderMist}90` }}
+      >
         By signing in, you agree to our{" "}
         <Link
-          className="underline transition-colors hover:text-purple-200"
+          className="underline transition-colors"
+          style={{ color: COLORS.softLavender }}
           href="#"
         >
           Terms of Service
         </Link>{" "}
         and{" "}
         <Link
-          className="underline transition-colors hover:text-purple-200"
+          className="underline transition-colors"
+          style={{ color: COLORS.softLavender }}
           href="#"
         >
           Privacy Policy

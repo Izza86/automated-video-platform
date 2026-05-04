@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkColabHealth } from "./colab-healthcheck";
+import { logger } from "./logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ML Envelope — metadata returned by refactored Python scripts
@@ -117,7 +118,7 @@ const SCRIPT_TO_ENDPOINT: Record<string, string> = {
 async function runColabMLScript<T = Record<string, unknown>>(
   scriptName: string,
   videoPath: string,
-  timeoutMs = 600_000,
+  timeoutMs = 1_200_000, // Increased timeout to 1200 seconds
   skipHealthCheck = false
 ): Promise<T | null> {
   const colabUrl = process.env.COLAB_GPU_URL;
@@ -138,7 +139,8 @@ async function runColabMLScript<T = Record<string, unknown>>(
     console.error(
       `[ml-runner] ❌ Video file not found for Colab upload: ${videoPath}`
     );
-    throw new Error(`Video file not found: ${videoPath}`);
+    logger.failStage(`Video Upload: Video file not found: ${videoPath}`);
+    return null;
   }
 
   // Pre-flight health check (uses 30s cache, so nearly free on repeat calls)
@@ -197,41 +199,68 @@ async function runColabMLScript<T = Record<string, unknown>>(
     const bodyBuffer = Buffer.concat(multipartBody);
     console.log(`[ml-runner] Multipart body size: ${(bodyBuffer.length / 1024 / 1024).toFixed(2)} MB`);
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response | null = null;
+    let lastErr: any = null;
+    const maxRetries = 3;
 
-    console.log(`[ml-runner] POST ${url} with timeout ${timeoutMs / 1000}s`);
-    
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
-      },
-      body: bodyBuffer,
-      signal: controller.signal,
-    }).catch(err => {
-      throw new Error(`Fetch failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        const delay = attempt * 2000;
+        console.log(`[ml-runner] 🔄 Retry attempt ${attempt}/${maxRetries} for ${scriptName} after ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
 
-    clearTimeout(timer);
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    // Always read response text first for debugging
-    const responseText = await response.text().catch(() => "");
-    
-    console.log(`[ml-runner] Response status: ${response.status}`);
-    
-    if (!response.ok) {
-      console.error(
-        `[ml-runner] ❌ Colab GPU returned ${response.status} for ${scriptName}`
-      );
-      console.error(`[ml-runner] Response body (first 1000 chars):\n${responseText.slice(0, 1000)}`);
-      throw new Error(`HTTP ${response.status}: ${responseText.slice(0, 200)}`);
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            "ngrok-skip-browser-warning": "any",
+          },
+          body: bodyBuffer,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+        if (response.ok) break; // Success!
+
+        // If we got a 503 or 504, it might be Ngrok throttling, so retry
+        if (response.status >= 500 && attempt < maxRetries) {
+          console.warn(`[ml-runner] ⚠️ Colab returned ${response.status}, retrying...`);
+          continue;
+        }
+        break; // Other error, don't retry automatically unless it's a socket error
+      } catch (err: any) {
+        lastErr = err;
+        console.error(`[ml-runner] ❌ Attempt ${attempt} failed for ${scriptName}:`, err?.message || err);
+        
+        // Retry on socket/network errors
+        if (attempt < maxRetries && (err?.name === "TypeError" || err?.code === "UND_ERR_SOCKET" || err?.message?.includes("fetch failed"))) {
+          continue;
+        }
+        break;
+      }
     }
+
+    if (!response || !response.ok) {
+      const status = response?.status || "Unknown";
+      const body = response ? await response.text().catch(() => "N/A") : (lastErr?.message || "Network Error");
+      console.error(`[ml-runner] ❌ Colab GPU failed after retries for ${scriptName} (Status: ${status})`);
+      console.error(`[ml-runner] Details: ${body.slice(0, 500)}`);
+      logger.failStage(`Colab Request Failed: ${status}`);
+      return null;
+    }
+
+    const responseText = await response.text();
 
     // Check for empty response
     if (!responseText || !responseText.trim()) {
       console.error(`[ml-runner] ❌ Colab GPU returned empty response for ${scriptName}`);
-      throw new Error("Colab returned empty response");
+      logger.failStage("Colab Response: Colab returned empty response");
+      return null;
     }
 
     // Parse JSON
@@ -241,7 +270,8 @@ async function runColabMLScript<T = Record<string, unknown>>(
     } catch (parseErr) {
       console.error(`[ml-runner] ❌ Failed to parse JSON from Colab for ${scriptName}`);
       console.error(`[ml-runner] Response text (first 500 chars):\n${responseText.slice(0, 500)}`);
-      throw new Error(`JSON parse failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+      logger.failStage(`JSON Parse: JSON parse failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+      return null;
     }
 
     console.log(
@@ -252,19 +282,11 @@ async function runColabMLScript<T = Record<string, unknown>>(
     );
     return data;
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    
-    if (err instanceof Error && err.name === "AbortError") {
-      console.error(
-        `[ml-runner] ❌ Colab GPU TIMEOUT for ${scriptName} after ${timeoutMs / 1000}s`
-      );
-      throw new Error(`Colab timeout after ${timeoutMs / 1000}s`);
-    } else {
-      console.error(
-        `[ml-runner] ❌ Colab GPU FAILED for ${scriptName}: ${errorMsg}`
-      );
-      throw err;
-    }
+    console.error(`[ml-runner] ❌ Error during Colab request:`, {
+      error: err,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
 }
 
@@ -278,17 +300,16 @@ async function runColabMLScript<T = Record<string, unknown>>(
 export async function runColabMLScriptWithRetry<T = Record<string, unknown>>(
   scriptName: string,
   videoPath: string,
-  timeoutMs = 600_000,
+  timeoutMs = 1_200_000, // Increased timeout to 1200 seconds
   maxRetries = 3
 ): Promise<T | null> {
   let lastError: Error | null = null;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     console.log(
       `[ml-runner] Colab ${scriptName} attempt ${attempt}/${maxRetries}`
     );
     try {
-      // Only run health check on the first attempt (subsequent ones already know the server was reachable)
       const result = await runColabMLScript<T>(
         scriptName,
         videoPath,
@@ -341,7 +362,8 @@ export async function runColabFullPipeline(
     console.error(
       `[ml-runner] ❌ Video file not found for Colab upload: ${videoPath}`
     );
-    throw new Error(`Video file not found: ${videoPath}`);
+    logger.failStage(`Video Upload: Video file not found: ${videoPath}`);
+    return null;
   }
 
   // Pre-flight health check
@@ -402,9 +424,8 @@ export async function runColabFullPipeline(
 
     clearTimeout(timer);
 
-    // Always read response text first for debugging
-    const responseText = await response.text().catch(() => "");
-    
+    const responseText = await response.text(); // Ensure response is read as text
+
     console.log(`[ml-runner] Response status: ${response.status}`);
 
     if (!response.ok) {

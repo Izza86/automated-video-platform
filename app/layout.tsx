@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import ClientMonitor from "@/components/client-monitor";
 import { ThemeProvider } from "@/components/theme-provider";
 import ClientNavHelpers from "./ClientNavHelpers";
+import AIVideoAssistant from "@/components/chat/AIVideoAssistant";
 
 // Lazy-load non-critical client components to reduce initial compilation
 // Remove dynamic imports for client components; use client wrappers instead
@@ -15,6 +16,11 @@ export const metadata: Metadata = {
   },
   description:
     "Professional AI-powered video editing platform. Clone any reference video's style — color grade, speed ramps, transitions — onto your target footage in one click.",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/favicon.ico",
+  },
   keywords: [
     "video editor",
     "AI video",
@@ -61,6 +67,7 @@ export default function RootLayout({
           <ClientMonitor />
           {children}
           <Toaster />
+          <AIVideoAssistant mode="floating" />
         </ThemeProvider>
       </body>
     </html>

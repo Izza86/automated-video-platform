@@ -110,12 +110,11 @@ export async function POST(req: NextRequest) {
     // Render options: keep file on disk for "video" / "both" modes
     const keepOutput = true;
 
-    console.log(
-      `[analyze-and-transfer] ref=${fmtMB(referenceBuffer.length)} ` +
-        `tgt=${fmtMB(targetBuffer.length)} ` +
-        `strategy=${transferOpts.strategy ?? "proportional"} ` +
-        `output=${outputMode}`
-    );
+    const logMsg = `[analyze-and-transfer] ref=${fmtMB(referenceBuffer.length)} tgt=${fmtMB(targetBuffer.length)} strategy=${transferOpts.strategy ?? "proportional"} output=${outputMode}`;
+    console.log(logMsg);
+    try {
+      fs.appendFileSync("pipeline_debug.log", `\n--- NEW RUN ${new Date().toISOString()} ---\n${logMsg}\n`);
+    } catch {}
 
     // ── Run the full pipeline ────────────────────────────────────────
     const { analysis, blueprint, instructions, transfer } =

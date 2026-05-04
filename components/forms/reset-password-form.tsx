@@ -29,6 +29,15 @@ import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
+// Deep Violet & Soft Lavender Color Palette
+const COLORS = {
+  deepIndigo: "#2E1A47",
+  richViolet: "#4B0082",
+  lavenderMist: "#E6E6FA",
+  softLavender: "#D8BFD8",
+  marigold: "#F4C430",
+};
+
 const formSchema = z.object({
   password: z.string().min(8),
   confirmPassword: z.string().min(8),
@@ -95,9 +104,20 @@ export function ResetPasswordForm({
                     name="password"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Password</FormLabel>
+                        <FormLabel style={{ color: COLORS.lavenderMist }}>
+                          New Password
+                        </FormLabel>
                         <FormControl>
-                          <Input {...field} type="password" />
+                          <Input
+                            className="h-12 text-white placeholder:text-white/40"
+                            placeholder="••••••••"
+                            type="password"
+                            style={{
+                              background: `${COLORS.deepIndigo}50`,
+                              borderColor: `${COLORS.lavenderMist}40`,
+                            }}
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -110,16 +130,35 @@ export function ResetPasswordForm({
                     name="confirmPassword"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Confirm Password</FormLabel>
+                        <FormLabel style={{ color: COLORS.lavenderMist }}>
+                          Confirm Password
+                        </FormLabel>
                         <FormControl>
-                          <Input {...field} type="password" />
+                          <Input
+                            className="h-12 text-white placeholder:text-white/40"
+                            placeholder="••••••••"
+                            type="password"
+                            style={{
+                              background: `${COLORS.deepIndigo}50`,
+                              borderColor: `${COLORS.lavenderMist}40`,
+                            }}
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
                 </div>
-                <Button className="w-full" disabled={isLoading} type="submit">
+                <Button
+                  className="h-12 w-full transform font-bold text-white shadow-xl transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl border-0"
+                  disabled={isLoading}
+                  type="submit"
+                  style={{
+                    background: `linear-gradient(135deg, ${COLORS.deepIndigo} 0%, ${COLORS.richViolet} 100%)`,
+                    boxShadow: `0 10px 25px -5px ${COLORS.deepIndigo}80`,
+                  }}
+                >
                   {isLoading ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (

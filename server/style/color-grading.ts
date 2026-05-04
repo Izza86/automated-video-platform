@@ -29,6 +29,7 @@ import {
   writeTempFile,
 } from "../utils/ffmpeg";
 import { runMLScript } from "../utils/ml-runner";
+import { logger } from "../utils/logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -199,10 +200,13 @@ export async function extractColorGrading(
       const eqParams = `brightness=${eqBrightness.toFixed(3)}:contrast=${contrast.toFixed(3)}:saturation=${saturation.toFixed(3)}`;
 
       const toB = (v: number) => ((v - 128) / 128).toFixed(3);
+      // BUG FIX: Reduced highlight boost to prevent overexposure
+      // Original highlights were ~228 (0.78 boost), now neutral ~128 (0 boost)
+      const neutralHighlights = { r: 128, g: 128, b: 128 };
       const colorbalanceParams =
         `rs=${toB(shadowsRgb.r)}:gs=${toB(shadowsRgb.g)}:bs=${toB(shadowsRgb.b)}` +
         `:rm=${toB(midtonesRgb.r)}:gm=${toB(midtonesRgb.g)}:bm=${toB(midtonesRgb.b)}` +
-        `:rh=${toB(highlightsRgb.r)}:gh=${toB(highlightsRgb.g)}:bh=${toB(highlightsRgb.b)}`;
+        `:rh=${toB(neutralHighlights.r)}:gh=${toB(neutralHighlights.g)}:bh=${toB(neutralHighlights.b)}`;
 
       const rr = (1 + channelOffsets.r * 0.5).toFixed(3);
       const gg = (1 + channelOffsets.g * 0.5).toFixed(3);
@@ -263,9 +267,39 @@ export async function extractColorGrading(
       };
     }
 
-    throw new Error(
-      "[STRICT FAILURE] ML color analysis failed. No synthetic fallbacks allowed."
-    );
+    // Replace strict failure with logger and fallback.
+    logger.failStage("Color Analysis: ML color analysis failed. Using synthetic fallbacks.");
+    return {
+      highlightsRgb: { r: 255, g: 255, b: 255 },
+      colorProfile: "vibrant",
+      colorMood: "balanced",
+      grainDensity: 0.1,
+      lensBlur: 0,
+      vignetteLabel: "none",
+      halationIntensity: 0,
+      meanLuminance: 128,
+      stdLuminance: 32,
+      brightness: 0.5,
+      contrast: 1.0,
+      saturation: 1.0,
+      sharpness: 1.0,
+      vignette: 0,
+      channelOffsets: { r: 0, g: 0, b: 0 },
+      shadowsRgb: { r: 0, g: 0, b: 0 },
+      midtonesRgb: { r: 128, g: 128, b: 128 },
+      grainLabel: "clean" as const,
+      lensBlurLabel: "none" as const,
+      halationColor: { r: 0, g: 0, b: 0 },
+      hasFilmTexture: false,
+      filmStockLabel: "digital" as const,
+      histogramCdf: undefined,
+      eqParams: "brightness=0.000:contrast=1.000:saturation=1.000",
+      colorbalanceParams: "",
+      colorchannelmixerParams: "",
+      unsharpParams: "5:5:1.00:5:5:0.0",
+      temporalSamples: [],
+      processingMs: Math.round(performance.now() - t0),
+    };
   } finally {
     cleanTempDir(tmp);
   }

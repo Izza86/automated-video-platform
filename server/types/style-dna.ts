@@ -354,6 +354,8 @@ export interface TargetContentContext {
   motionData: MotionAnalysisResult;
   /** Target depth analysis (optional) */
   depthData?: DepthAnalysisResult;
+  /** Target color histogram CDF for proper histogram matching */
+  targetHistogramCdf?: { r: number[]; g: number[]; b: number[] } | null;
   /** Output width in pixels */
   width: number;
   /** Output height in pixels */

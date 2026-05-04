@@ -16,27 +16,27 @@ import {
 const PLANS = {
   "pro-monthly": {
     name: "Pro",
-    price: 19,
+    price: 5,
     interval: "month",
     priceId: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY_PRICE_ID!,
   },
   "pro-yearly": {
     name: "Pro",
-    price: 190,
+    price: 50,
     interval: "year",
     priceId: process.env.NEXT_PUBLIC_STRIPE_PRO_YEARLY_PRICE_ID!,
   },
-  "business-monthly": {
-    name: "Business",
-    price: 49,
+  "premium-monthly": {
+    name: "Premium",
+    price: 10,
     interval: "month",
-    priceId: process.env.NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY_PRICE_ID!,
+    priceId: process.env.NEXT_PUBLIC_STRIPE_PREMIUM_MONTHLY_PRICE_ID!,
   },
-  "business-yearly": {
-    name: "Business",
-    price: 490,
+  "premium-yearly": {
+    name: "Premium",
+    price: 100,
     interval: "year",
-    priceId: process.env.NEXT_PUBLIC_STRIPE_BUSINESS_YEARLY_PRICE_ID!,
+    priceId: process.env.NEXT_PUBLIC_STRIPE_PREMIUM_YEARLY_PRICE_ID!,
   },
 };
 

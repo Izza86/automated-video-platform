@@ -430,3 +430,258 @@
 .lamp-pull-bounce {
   animation: pullBounce 1.5s ease-in-out infinite;
 }
+
+/* ===== Deep Violet Theme Animations ===== */
+@keyframes violetGlow {
+  0%, 100% {
+    box-shadow:
+      0 0 30px rgba(46, 26, 71, 0.6),
+      0 0 60px rgba(75, 0, 130, 0.4),
+      0 0 90px rgba(244, 196, 48, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 40px rgba(46, 26, 71, 0.8),
+      0 0 80px rgba(75, 0, 130, 0.6),
+      0 0 120px rgba(244, 196, 48, 0.3);
+  }
+}
+
+@keyframes lavenderShimmer {
+  0% {
+    background-position: -200% center;
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    background-position: 200% center;
+    opacity: 0.5;
+  }
+}
+
+@keyframes marigoldPulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(244, 196, 48, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(244, 196, 48, 0.8), 0 0 40px rgba(255, 215, 0, 0.4);
+  }
+}
+
+@keyframes floatSparkle {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(-20px) scale(1.2);
+    opacity: 1;
+  }
+}
+
+@keyframes lightSpread {
+  0% {
+    opacity: 0;
+    transform: scaleY(0) scaleX(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1) scaleX(1);
+  }
+  100% {
+    opacity: 0.9;
+    transform: scaleY(1.1) scaleX(1.05);
+  }
+}
+
+@keyframes cordSwing {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(5deg);
+  }
+  75% {
+    transform: rotate(-5deg);
+  }
+}
+
+.violet-glow {
+  animation: violetGlow 4s ease-in-out infinite;
+}
+
+.lavender-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(230, 230, 250, 0.2),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: lavenderShimmer 3s ease-in-out infinite;
+}
+
+.marigold-pulse {
+  animation: marigoldPulse 2s ease-in-out infinite;
+}
+
+.float-sparkle {
+  animation: floatSparkle 3s ease-in-out infinite;
+}
+
+.light-spread {
+  animation: lightSpread 0.8s ease-out forwards;
+}
+
+.cord-swing {
+  transform-origin: top center;
+  animation: cordSwing 2s ease-in-out infinite;
+}
+
+/* Process Flow Animations */
+@keyframes floatUpDown {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes processGlow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(168, 85, 247, 0.9), 0 0 60px rgba(236, 72, 153, 0.6);
+  }
+}
+
+.process-card-active {
+  animation: processGlow 2s ease-in-out infinite;
+}
+
+/* Before & After Slider Animation */
+@keyframes slideLeft {
+  0%, 100% {
+    left: 50%;
+  }
+  50% {
+    left: 20%;
+  }
+}
+
+/* Tech Card Floating Animation */
+@keyframes floatCard {
+  0%, 100% {
+    transform: translateY(0px) rotateX(0deg) rotateY(0deg);
+  }
+  25% {
+    transform: translateY(-8px) rotateX(2deg) rotateY(-2deg);
+  }
+  50% {
+    transform: translateY(-12px) rotateX(0deg) rotateY(2deg);
+  }
+  75% {
+    transform: translateY(-6px) rotateX(-2deg) rotateY(0deg);
+  }
+}
+
+.animate-float-card {
+  animation: floatCard 6s ease-in-out infinite;
+}
+
+/* Icon Float Animation */
+@keyframes iconFloat {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+    filter: drop-shadow(0 0 0px rgba(168, 85, 247, 0));
+  }
+  50% {
+    transform: translateY(-10px) scale(1.1);
+    filter: drop-shadow(0 10px 20px rgba(168, 85, 247, 0.4));
+  }
+}
+
+.animate-icon-float {
+  animation: iconFloat 3s ease-in-out infinite;
+}
+
+/* Data Flow Animation - Animated dashed lines */
+@keyframes dataFlow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -300;
+  }
+}
+
+.animate-data-flow {
+  animation: dataFlow 3s linear infinite;
+}
+
+/* Glow Pulse Animation */
+@keyframes glowPulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+    box-shadow: 0 0 10px currentColor;
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.3);
+    box-shadow: 0 0 25px currentColor, 0 0 40px currentColor;
+  }
+}
+
+.animate-glow-pulse {
+  animation: glowPulse 2s ease-in-out infinite;
+}
+
+/* Scan Line Animation */
+@keyframes scanLine {
+  0% {
+    top: -10%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    top: 110%;
+    opacity: 0;
+  }
+}
+
+.animate-scan-line {
+  animation: scanLine 4s ease-in-out infinite;
+}
+
+/* Slow pulse for background */
+@keyframes pulseSlow {
+  0%, 100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulseSlow 4s ease-in-out infinite;
+}

@@ -1,0 +1,476 @@
+"use client";
+
+import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  Download,
+  Film,
+  Flame,
+  Loader2,
+  Music,
+  Play,
+  Sparkles,
+  TrendingUp,
+  Upload,
+  Video,
+  Volume2,
+  X,
+  Zap,
+  Wand2,
+  Share2,
+  Type,
+} from "lucide-react";
+import Link from "next/link";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+
+/* ------------------------------------------------------------------ */
+/*  DATA                                                               */
+/* ------------------------------------------------------------------ */
+
+const CATEGORIES = [
+  { id: "all", label: "All", icon: Sparkles },
+  { id: "trending", label: "Trending", icon: Flame },
+  { id: "cinematic", label: "Cinematic", icon: Film },
+  { id: "transitions", label: "Transitions", icon: Zap },
+  { id: "text", label: "Text & Lower", icon: Type },
+  { id: "social", label: "Social Media", icon: Share2 },
+  { id: "effects", label: "Effects", icon: Wand2 },
+  { id: "promo", label: "Promo & Ads", icon: TrendingUp },
+] as const;
+
+interface TemplateItem {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  duration: string;
+  uses: number;
+  likes: number;
+  music: string;
+  musicArtist: string;
+  featured?: boolean;
+  trending?: boolean;
+  new?: boolean;
+  videoUrl?: string;
+  thumbnail: string;
+}
+
+const ALL_TEMPLATES: TemplateItem[] = [
+  /* ── Featured / Trending ── */
+  {
+    id: "cinematic_teal_orange",
+    name: "Cinematic Teal & Orange",
+    category: "cinematic",
+    description: "Professional film look with teal shadows and orange highlights",
+    duration: "0:15",
+    uses: 12840,
+    likes: 3420,
+    music: "Nocturnal",
+    musicArtist: "The Weeknd",
+    featured: true,
+    trending: true,
+    thumbnail:
+      "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=700&fit=crop",
+  },
+  {
+    id: "fast_beat_sync",
+    name: "Fast Beat Sync",
+    category: "transitions",
+    description: "Quick cuts synced to every beat with flash effects",
+    duration: "0:10",
+    uses: 25600,
+    likes: 8900,
+    music: "Blinding Lights",
+    musicArtist: "The Weeknd",
+    featured: true,
+    trending: true,
+    thumbnail:
+      "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=700&fit=crop",
+  },
+  {
+    id: "neon_glow_text",
+    name: "Neon Glow Text",
+    category: "text",
+    description: "Glowing neon text reveal with cyberpunk vibes",
+    duration: "0:08",
+    uses: 9450,
+    likes: 2100,
+    music: "Synthwave Night",
+    musicArtist: "Kavinsky",
+    featured: true,
+    new: true,
+    thumbnail:
+      "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=400&h=700&fit=crop",
+  },
+  {
+    id: "tiktok_viral",
+    name: "TikTok Viral Style",
+    category: "social",
+    description: "Trending TikTok format with fast zooms and text",
+    duration: "0:15",
+    uses: 42100,
+    likes: 15600,
+    music: "Savage Love",
+    musicArtist: "Jason Derulo",
+    featured: true,
+    trending: true,
+    thumbnail:
+      "https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=400&h=700&fit=crop",
+  },
+  /* ── Cinematic ── */
+  {
+    id: "smooth_zoom_in",
+    name: "Smooth Zoom In",
+    category: "cinematic",
+    description: "Slow cinematic zoom with soft blur edges",
+    duration: "0:12",
+    uses: 6780,
+    likes: 1540,
+    music: "Interstellar",
+    musicArtist: "Hans Zimmer",
+    thumbnail:
+      "https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=400&h=700&fit=crop",
+  },
+  {
+    id: "vintage_vhs",
+    name: "Retro VHS 80s",
+    category: "effects",
+    description: "Old school VHS with scan lines and tracking errors",
+    duration: "0:20",
+    uses: 11200,
+    likes: 3800,
+    music: "Take On Me",
+    musicArtist: "a-ha",
+    trending: true,
+    thumbnail:
+      "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=400&h=700&fit=crop",
+  },
+  {
+    id: "dramatic_slowmo",
+    name: "Dramatic Slow-Mo",
+    category: "cinematic",
+    description: "Cinematic slow motion with epic music drop",
+    duration: "0:18",
+    uses: 5400,
+    likes: 1200,
+    music: "Time",
+    musicArtist: "Hans Zimmer",
+    thumbnail:
+      "https://images.unsplash.com/photo-1516410529446-2c777cb7366d?w=400&h=700&fit=crop",
+  },
+  /* ── Transitions ── */
+  {
+    id: "whip_pan_left",
+    name: "Whip Pan Left",
+    category: "transitions",
+    description: "Fast whip pan with motion blur to the left",
+    duration: "0:02",
+    uses: 18900,
+    likes: 4200,
+    music: "None",
+    musicArtist: "",
+    thumbnail:
+      "https://images.unsplash.com/photo-1511447333015-45b65e60f6d5?w=400&h=700&fit=crop",
+  },
+  {
+    id: "glitch_transition",
+    name: "Digital Glitch Cut",
+    category: "transitions",
+    description: "RGB split glitch with digital distortion",
+    duration: "0:02",
+    uses: 15600,
+    likes: 3600,
+    music: "None",
+    musicArtist: "",
+    trending: true,
+    thumbnail:
+      "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=400&h=700&fit=crop",
+  },
+  {
+    id: "light_leak_fade",
+    name: "Light Leak Fade",
+    category: "transitions",
+    description: "Cinematic light leak with orange film fade",
+    duration: "0:03",
+    uses: 9800,
+    likes: 2100,
+    music: "None",
+    musicArtist: "",
+    thumbnail:
+      "https://images.unsplash.com/photo-1509343256512-d77a5ae5ca00?w=400&h=700&fit=crop",
+  },
+  /* ── Text & Lower ── */
+  {
+    id: "modern_lower_third",
+    name: "Modern Lower Third",
+    category: "text",
+    description: "Clean animated name tag for interviews",
+    duration: "0:05",
+    uses: 7600,
+    likes: 1800,
+    music: "None",
+    musicArtist: "",
+    thumbnail:
+      "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400&h=700&fit=crop",
+  },
+  {
+    id: "typewriter_title",
+    name: "Typewriter Title",
+    category: "text",
+    description: "Letter by letter typing effect for titles",
+    duration: "0:06",
+    uses: 6200,
+    likes: 1400,
+    music: "Typing SFX",
+    musicArtist: "",
+    thumbnail:
+      "https://images.unsplash.com/photo-1488590528505-98d6b5aba04b?w=400&h=700&fit=crop",
+  },
+  /* ── Social Media ── */
+  {
+    id: "insta_story",
+    name: "Instagram Story",
+    category: "social",
+    description: "Vertical 9:16 format with stickers and poll",
+    duration: "0:15",
+    uses: 23400,
+    likes: 6700,
+    music: "Good 4 U",
+    musicArtist: "Olivia Rodrigo",
+    thumbnail:
+      "https://images.unsplash.com/photo-1611162618479-ee3d24aaef0b?w=400&h=700&fit=crop",
+  },
+  {
+    id: "youtube_shorts",
+    name: "YouTube Shorts Intro",
+    category: "social",
+    description: "Fast hook intro for Shorts with subscribe button",
+    duration: "0:05",
+    uses: 19800,
+    likes: 5400,
+    music: "Subscribe",
+    musicArtist: "Royalty Free",
+    thumbnail:
+      "https://images.unsplash.com/photo-1611162618071-b39a2ec055fb?w=400&h=700&fit=crop",
+  },
+  /* ── Effects ── */
+  {
+    id: "cyberpunk_neon",
+    name: "Cyberpunk Neon",
+    category: "effects",
+    description: "Futuristic neon look with chromatic aberration",
+    duration: "Variable",
+    uses: 13400,
+    likes: 4100,
+    music: "Nightcall",
+    musicArtist: "Kavinsky",
+    trending: true,
+    thumbnail:
+      "https://images.unsplash.com/photo-1477346611705-65d1883cee1e?w=400&h=700&fit=crop",
+  },
+  {
+    id: "bokeh_dream",
+    name: "Bokeh Dream",
+    category: "effects",
+    description: "Dreamy soft bokeh lights overlaid on video",
+    duration: "Variable",
+    uses: 8900,
+    likes: 2600,
+    music: "Clair de Lune",
+    musicArtist: "Debussy",
+    thumbnail:
+      "https://images.unsplash.com/photo-1470790376778-a9fbc86d70e2?w=400&h=700&fit=crop",
+  },
+  {
+    id: "camera_shake",
+    name: "Camera Shake Impact",
+    category: "effects",
+    description: "Add impact shake for action moments",
+    duration: "0:03",
+    uses: 10200,
+    likes: 2900,
+    music: "None",
+    musicArtist: "",
+    thumbnail:
+      "https://images.unsplash.com/photo-1527430253228-e93688616381?w=400&h=700&fit=crop",
+  },
+  /* ── Promo & Ads ── */
+  {
+    id: "product_showcase",
+    name: "Product Showcase",
+    category: "promo",
+    description: "Elegant rotating product display with glow",
+    duration: "0:30",
+    uses: 5400,
+    likes: 1200,
+    music: "Corporate Upbeat",
+    musicArtist: "Royalty Free",
+    thumbnail:
+      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=700&fit=crop",
+  },
+  {
+    id: "sale_flash",
+    name: "Sale Flash Banner",
+    category: "promo",
+    description: "Eye-catching sale promo with countdown text",
+    duration: "0:15",
+    uses: 7800,
+    likes: 1900,
+    music: "Energetic Beat",
+    musicArtist: "Royalty Free",
+    thumbnail:
+      "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=400&h=700&fit=crop",
+  },
+];
+
+/* ------------------------------------------------------------------ */
+/*  UTILS                                                              */
+/* ------------------------------------------------------------------ */
+
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+  return n.toString();
+}
+
+/* ------------------------------------------------------------------ */
+/*  MAIN COMPONENT                                                     */
+/* ------------------------------------------------------------------ */
+
+export default function TemplatesPage() {
+  const [activeCategory, setActiveCategory] = useState("all");
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
+  const [step, setStep] = useState<0 | 1 | 2 | 3>(0); // 0=browse,1=upload,2=process,3=done
+  const [targetFile, setTargetFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [processStage, setProcessStage] = useState(0);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [videoPreview, setVideoPreview] = useState<string | null>(null);
+
+  /* ── processing animation ── */
+  useEffect(() => {
+    let interval: any;
+    if (loading && progress < 95) {
+      interval = setInterval(() => {
+        setProgress((p) => {
+          const next = Math.min(p + Math.random() * 5 + 1, 95);
+          if (next > 20) setProcessStage(1);
+          if (next > 45) setProcessStage(2);
+          if (next > 75) setProcessStage(3);
+          return next;
+        });
+      }, 600);
+    }
+    return () => clearInterval(interval);
+  }, [loading, progress]);
+
+  const handleApply = async () => {
+    if (!targetFile || !selectedTemplate) return;
+    setLoading(true);
+    setStep(2);
+    setError("");
+    setResult(null);
+    setProgress(0);
+    setProcessStage(0);
+
+    try {
+      const formData = new FormData();
+      formData.append("target", targetFile);
+      formData.append("templateId", selectedTemplate.id);
+      formData.append("outputMode", "both");
+
+      const res = await fetch("/api/template-edit", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed");
+      setResult(data);
+      setProgress(100);
+      setProcessStage(4);
+      setStep(3);
+      toast.success("Template applied successfully!");
+    } catch (err: any) {
+      setError(err.message);
+      setStep(1);
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetAll = useCallback(() => {
+    setStep(0);
+    setSelectedTemplate(null);
+    setTargetFile(null);
+    setResult(null);
+    setError("");
+    setProgress(0);
+    setProcessStage(0);
+    setVideoPreview(null);
+  }, []);
+
+  const filtered =
+    activeCategory === "all"
+      ? ALL_TEMPLATES
+      : activeCategory === "trending"
+      ? ALL_TEMPLATES.filter((t) => t.trending)
+      : ALL_TEMPLATES.filter((t) => t.category === activeCategory);
+
+  const featured = ALL_TEMPLATES.filter((t) => t.featured);
+
+  /* ── screens ── */
+  if (step === 2) {
+    return (
+      <ProcessingScreen
+        progress={progress}
+        stage={processStage}
+        templateName={selectedTemplate?.name || ""}
+      />
+    );
+  }
+
+  if (step === 3 && result) {
+    return (
+      <ResultScreen
+        result={result}
+        template={selectedTemplate}
+        onReset={resetAll}
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#0a0a0f] via-[#0f0f1a] to-[#0a0a0f] text-white overflow-x-hidden">
+      {/* Ambient floating particles background */}
+      <ParticleBackground />
+
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-[#0a0a0f]/80 backdrop-blur-xl border-b border-white/5">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 text-purple-400 hover:text-purple-300 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="hidden sm:inline text-sm font-medium">Back</span>
+            </Link>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
+          

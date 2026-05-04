@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -19,6 +19,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
+
+// Deep Violet & Soft Lavender Color Palette
+const COLORS = {
+  deepIndigo: "#2E1A47",
+  richViolet: "#4B0082",
+  lavenderMist: "#E6E6FA",
+  softLavender: "#D8BFD8",
+  marigold: "#F4C430",
+};
 
 const formSchema = z.object({
   email: z.string().email(),
@@ -72,12 +81,17 @@ export function ForgotPasswordForm({
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-white">Email Address</FormLabel>
+                  <FormLabel style={{ color: COLORS.lavenderMist }}>
+                    Email Address
+                  </FormLabel>
                   <FormControl>
                     <Input
-                      className="h-12 border-purple-500/50 bg-black/30 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/30"
+                      className="h-12 text-white placeholder:text-white/40"
                       placeholder="you@example.com"
-                      type="email"
+                      style={{
+                        background: `${COLORS.deepIndigo}50`,
+                        borderColor: `${COLORS.lavenderMist}40`,
+                      }}
                       {...field}
                     />
                   </FormControl>
@@ -88,9 +102,13 @@ export function ForgotPasswordForm({
 
             {/* Submit Button */}
             <Button
-              className="h-12 w-full transform bg-gradient-to-r from-purple-600 to-pink-600 font-bold text-white shadow-xl transition-all duration-300 hover:scale-[1.02] hover:from-purple-500 hover:to-pink-500 hover:shadow-2xl"
+              className="h-12 w-full transform font-bold text-white shadow-xl transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl border-0"
               disabled={isLoading}
               type="submit"
+              style={{
+                background: `linear-gradient(135deg, ${COLORS.deepIndigo} 0%, ${COLORS.richViolet} 100%)`,
+                boxShadow: `0 10px 25px -5px ${COLORS.deepIndigo}80`,
+              }}
             >
               {isLoading ? (
                 <>
@@ -106,19 +124,25 @@ export function ForgotPasswordForm({
             <div className="text-center text-purple-200 text-sm">
               Remember your password?{" "}
               <Link
-                className="font-semibold text-white underline underline-offset-4 transition-colors hover:text-purple-300"
+                className="inline-flex items-center gap-2 text-sm transition-colors"
+                style={{ color: COLORS.softLavender }}
                 href="/login"
               >
-                Back to login
+                <ArrowLeft className="h-4 w-4" />
+                Back to Login
               </Link>
             </div>
           </div>
         </form>
       </Form>
 
-      {/* Info */}
-      <div className="text-center text-purple-300/70 text-xs">
-        We'll send you a secure link to reset your password
+      {/* Terms & Info */}
+      <div
+        className="text-center text-xs"
+        style={{ color: `${COLORS.lavenderMist}90` }}
+      >
+        <p>We&apos;ll send you an email with a secure link to reset your password.</p>
+        <p className="mt-1">Make sure to check your spam folder if you don&apos;t see it.</p>
       </div>
     </div>
   );

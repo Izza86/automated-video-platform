@@ -1,4 +1,5 @@
 import { ArrowLeft, Search, Users } from "lucide-react";
+import type { User } from "@/db/schema";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AddUserDialog } from "@/components/add-user-dialog";
@@ -19,8 +20,8 @@ export default async function UsersManagementPage() {
 
   const { users } = await getAllUsers();
 
-  const activeUsers = users.filter((u) => u.emailVerified);
-  const admins = users.filter((u) => u.role === "admin");
+  const activeUsers = users.filter((u: User) => u.emailVerified);
+  const admins = users.filter((u: User) => u.role === "admin");
 
   return (
     <div className="min-h-screen bg-[#1a1408] text-white">
@@ -125,7 +126,7 @@ export default async function UsersManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-purple-500/20">
-                  {users.map((user) => (
+                  {users.map((user: User) => (
                     <tr
                       className="transition-colors hover:bg-black/40"
                       key={user.id}

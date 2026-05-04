@@ -109,7 +109,10 @@ export async function checkColabHealth(
       const response = await fetch(healthUrl, {
         method: "GET",
         signal: controller.signal,
-        headers: { Accept: "application/json" },
+        headers: { 
+          Accept: "application/json",
+          "ngrok-skip-browser-warning": "any"
+        },
       }).catch(err => {
         throw new Error(`Fetch failed: ${err instanceof Error ? err.message : String(err)} — check COLAB_GPU_URL and network connectivity`);
       });

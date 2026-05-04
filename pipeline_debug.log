@@ -1,0 +1,113 @@
+
+--- NEW RUN 2026-04-24T12:47:24.372Z ---
+[analyze-and-transfer] ref=1.3MB tgt=3.1MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-24T14:59:59.880Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-24T15:03:11.574Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-24T15:58:10.495Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-24T16:05:22.561Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777047091695.mp4
+[orchestrator] ❌ transferEdit FAILED at 2026-04-24T16:14:32.931Z:
+Error: Fetch failed: fetch failed
+    at E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__4ccdc60e._.js:7:464
+    at async b (E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__4ccdc60e._.js:7:236)
+    at async C (E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__4ccdc60e._.js:9:1076)
+    at async a (E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__4716ba84._.js:1:11806)
+    at async Promise.all (index 0)
+    at async C (E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__2da51376._.js:4:10321)
+    at async A (E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__2da51376._.js:8:597)
+    at async x (E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__2da51376._.js:8:16548)
+    at async C (E:\automated-video-editor\.next\server\chunks\[root-of-the-server]__3ad78f43._.js:4:65)
+    at async rM.do (E:\automated-video-editor\node_modules\.pnpm\next@16.0.3_react-dom@19.2.3_react@19.2.3__react@19.2.3\node_modules\next\dist\compiled\next-server\app-route-turbo.runtime.prod.js:5:20152)
+
+--- NEW RUN 2026-04-24T16:43:16.562Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-24T17:13:47.785Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-25T04:39:26.060Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-25T04:41:28.385Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-25T06:51:57.618Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-25T08:09:07.281Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777104691448.mp4
+
+--- NEW RUN 2026-04-25T09:25:42.287Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777109266937.mp4
+
+--- NEW RUN 2026-04-25T11:21:41.435Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777116228537.mp4
+
+--- NEW RUN 2026-04-25T12:02:34.234Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777118712084.mp4
+
+--- NEW RUN 2026-04-25T12:28:55.792Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777120231311.mp4
+
+--- NEW RUN 2026-04-27T15:15:39.436Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-27T15:33:38.833Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-27T17:42:42.400Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+
+--- NEW RUN 2026-04-28T02:51:14.015Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777344757335.mp4
+
+--- NEW RUN 2026-05-03T17:45:48.369Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777830469920.mp4
+
+--- NEW RUN 2026-05-03T20:42:46.878Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777841068376.mp4
+
+--- NEW RUN 2026-05-04T12:28:45.093Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777897814226.mp4
+
+--- NEW RUN 2026-05-04T14:28:51.224Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777905047225.mp4
+
+--- NEW RUN 2026-05-04T14:53:39.390Z ---
+[analyze-and-transfer] ref=0.7MB tgt=1.9MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777906522560.mp4
+
+--- NEW RUN 2026-05-04T15:31:04.680Z ---
+[analyze-and-transfer] ref=1.3MB tgt=1.4MB strategy=proportional output=both
+[edit-transfer] ✅ Filter graph generated successfully.
+[edit-transfer] ✅ Colab GPU render saved to E:\automated-video-editor\public\outputs\transfer-1777908746652.mp4

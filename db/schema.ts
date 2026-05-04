@@ -293,6 +293,75 @@ export const paymentRelations = relations(payment, ({ one }) => ({
   }),
 }));
 
+// Support ticket status enum
+export const ticketStatusEnum = pgEnum("ticket_status", ["open", "in_progress", "resolved", "closed"]);
+
+// Support ticket priority enum
+export const ticketPriorityEnum = pgEnum("ticket_priority", ["low", "medium", "high", "urgent"]);
+
+// Activity type enum
+export const activityTypeEnum = pgEnum("activity_type", [
+  "upload", "download", "process", "signup", "login", "logout",
+  "subscribe", "cancel", "update_profile", "create_project", "delete_project"
+]);
+
+// Support tickets table
+export const supportTicket = pgTable(
+  "support_ticket",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    subject: text("subject").notNull(),
+    description: text("description").notNull(),
+    status: ticketStatusEnum("status").$defaultFn(() => "open").notNull(),
+    priority: ticketPriorityEnum("priority").$defaultFn(() => "medium").notNull(),
+    assignedTo: text("assigned_to").references(() => user.id),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()).notNull(),
+    resolvedAt: timestamp("resolved_at"),
+  },
+  (table) => [
+    index("ticket_user_id_idx").on(table.userId),
+    index("ticket_status_idx").on(table.status),
+    index("ticket_priority_idx").on(table.priority),
+    index("ticket_created_at_idx").on(table.createdAt),
+  ]
+);
+
+// Activity logs table
+export const activityLog = pgTable(
+  "activity_log",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: activityTypeEnum("type").notNull(),
+    description: text("description").notNull(),
+    metadata: jsonb("metadata"),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+  },
+  (table) => [
+    index("activity_user_id_idx").on(table.userId),
+    index("activity_type_idx").on(table.type),
+    index("activity_created_at_idx").on(table.createdAt),
+  ]
+);
+
+// Relations for new tables
+export const supportTicketRelations = relations(supportTicket, ({ one }) => ({
+  user: one(user, { fields: [supportTicket.userId], references: [user.id] }),
+  assignedAdmin: one(user, { fields: [supportTicket.assignedTo], references: [user.id] }),
+}));
+
+export const activityLogRelations = relations(activityLog, ({ one }) => ({
+  user: one(user, { fields: [activityLog.userId], references: [user.id] }),
+}));
+
 export const schema = {
   user,
   session,
@@ -303,6 +372,8 @@ export const schema = {
   subscription,
   usage,
   payment,
+  supportTicket,
+  activityLog,
   // Relations
   userRelations,
   sessionRelations,
@@ -311,4 +382,10 @@ export const schema = {
   subscriptionRelations,
   usageRelations,
   paymentRelations,
+  supportTicketRelations,
+  activityLogRelations,
 };
+
+// Export types for new tables
+export type SupportTicket = typeof supportTicket.$inferSelect;
+export type ActivityLog = typeof activityLog.$inferSelect;

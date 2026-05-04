@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useState } from "react";
 import LandingBelowFold from "@/components/landing/landing-below-fold";
 import { LandingNavbar } from "@/components/landing/landing-navbar";
+import VideoEditorChatbot from "@/components/chat/VideoEditorChatbot";
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
@@ -23,22 +24,22 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#1a1408] via-[#2d1f0e] to-[#1a1408]">
+    <div className="min-h-screen bg-[#05030b] text-white">
       <LandingNavbar />
 
       {/* Marquee Text */}
-      <div className="w-full overflow-hidden border-amber-400/50 border-y bg-gradient-to-r from-amber-700 via-yellow-600 to-amber-700 py-4">
+      <div className="w-full overflow-hidden border-pink-500/20 border-y bg-[#120517]/90 py-4 backdrop-blur-sm">
         <div className="flex whitespace-nowrap">
           <div className="marquee flex items-center gap-8">
             {[...Array(10)].map((_, i) => (
               <span
-                className="flex items-center gap-8 font-bold text-white text-xl md:text-2xl"
+                className="flex items-center gap-8 font-bold text-pink-300 text-xl md:text-2xl"
                 key={i}
               >
-                <span>✨ Transform Your Video with AI</span>
-                <span className="text-purple-200">•</span>
-                <span>Transform Your Video with AI</span>
-                <span className="text-purple-200">•</span>
+                <span className="text-fuchsia-400">✨ Transform Your Video with AI</span>
+                <span className="text-pink-500">•</span>
+                <span className="text-violet-300">Transform Your Video with AI</span>
+                <span className="text-pink-500">•</span>
               </span>
             ))}
           </div>
@@ -47,13 +48,13 @@ export default function Home() {
 
       {/* Hero Section */}
       <section
-        className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-amber-900/20 via-yellow-900/10 to-[#1a1408] pt-24 pb-12"
+        className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#05030b] pt-24 pb-12"
         id="hero"
       >
         <div className="absolute inset-0">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(180,130,50,0.2),transparent_50%)]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_60%,rgba(200,150,60,0.15),transparent_50%)]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_80%,rgba(160,120,40,0.1),transparent_50%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(168,85,247,0.25),transparent_50%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_50%,rgba(236,72,153,0.22),transparent_50%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_85%,rgba(79,70,229,0.18),transparent_50%)]" />
         </div>
 
         {isMounted &&
@@ -70,13 +71,13 @@ export default function Home() {
 
         <div className="relative z-20 mx-auto flex w-full max-w-[1400px] items-center justify-between gap-32 px-6">
           <div className="max-w-2xl text-left">
-            <div className="mb-6 inline-block rounded-full border border-purple-500/50 bg-purple-600/20 px-4 py-2 backdrop-blur-sm">
-              <span className="font-medium text-purple-300 text-sm">
+            <div className="mb-6 inline-block rounded-full border border-pink-500/40 bg-white/5 px-4 py-2 backdrop-blur-sm">
+              <span className="font-medium text-pink-300 text-sm">
                 AI-Powered Video Editing
               </span>
             </div>
 
-            <h1 className="mb-4 animate-[slideDown_1s_ease-out] font-extrabold text-6xl text-white drop-shadow-2xl md:text-7xl">
+            <h1 className="mb-4 animate-[slideDown_1s_ease-out] font-extrabold text-6xl text-white md:text-7xl">
               Transform Your Videos
             </h1>
 
@@ -84,7 +85,7 @@ export default function Home() {
               <div className="scroll-text flex whitespace-nowrap">
                 {[...Array(5)].map((_, i) => (
                   <h2
-                    className="gradient-text mx-8 font-bold text-5xl md:text-6xl"
+                    className="gradient-text mx-8 font-bold text-5xl md:text-6xl text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 via-violet-300 to-pink-300"
                     key={i}
                   >
                     with AI Style Transfer
@@ -93,15 +94,15 @@ export default function Home() {
               </div>
             </div>
 
-            <p className="mt-6 animate-[slideUp_1s_ease-out] text-white/80 text-xl leading-relaxed md:text-2xl">
+            <p className="mt-6 animate-[slideUp_1s_ease-out] text-slate-300 text-xl leading-relaxed md:text-2xl">
               Copy cinematic looks, colors, and moods from any reference video
-              <span className="font-semibold text-purple-400"> instantly</span>{" "}
+              <span className="font-semibold text-pink-400"> instantly</span>{" "}
               with our AI-powered style transfer
             </p>
 
             <div className="mt-12 flex animate-[fadeIn_1.2s_ease-out] flex-col gap-4 sm:flex-row">
               <Link
-                className="group relative inline-flex items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-purple-600 to-pink-600 px-8 py-4 font-bold text-lg text-white shadow-2xl shadow-purple-900/50 transition-all duration-300 hover:from-purple-500 hover:to-pink-500"
+                className="group relative inline-flex items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-r from-purple-600 to-pink-500 px-8 py-4 font-bold text-lg text-white shadow-2xl shadow-purple-200/40 transition-all duration-300 hover:from-purple-500 hover:to-pink-400"
                 href="/signup"
               >
                 <span className="shimmer-effect absolute inset-0" />
@@ -111,32 +112,32 @@ export default function Home() {
                 </span>
               </Link>
               <a
-                className="inline-flex items-center justify-center rounded-2xl border-2 border-purple-500/50 bg-black/40 px-8 py-4 font-semibold text-lg text-white backdrop-blur-sm transition-all duration-300 hover:border-purple-400 hover:bg-purple-900/30"
+                className="inline-flex items-center justify-center rounded-2xl border-2 border-fuchsia-500/40 bg-white/10 px-8 py-4 font-semibold text-lg text-pink-200 backdrop-blur-sm transition-all duration-300 hover:border-pink-400 hover:bg-white/15"
                 href="#features"
               >
-                <Video className="mr-2 h-5 w-5" />
+                <Video className="mr-2 h-5 w-5 text-pink-200" />
                 Watch Demo
               </a>
             </div>
 
-            <div className="mt-12 grid grid-cols-3 gap-6">
+            <div className="mt-12 grid grid-cols-3 gap-6 text-left">
               {[
                 { value: "10K+", label: "Videos Processed" },
                 { value: "4.9/5", label: "User Rating" },
                 { value: "50+", label: "AI Models" },
               ].map((stat, i) => (
                 <div key={i}>
-                  <div className="mb-1 font-bold text-2xl text-purple-400 md:text-3xl">
+                  <div className="mb-1 font-bold text-2xl text-white md:text-3xl">
                     {stat.value}
                   </div>
-                  <div className="text-white/60 text-xs">{stat.label}</div>
+                  <div className="text-slate-400 text-xs">{stat.label}</div>
                 </div>
               ))}
             </div>
           </div>
 
           <div className="relative ml-auto h-[650px] w-[500px] flex-shrink-0">
-            {/* Reference Video Card */}
+      {/* Reference Video Card */}
             <div className="group absolute top-0 right-0 h-80 w-52 overflow-hidden rounded-3xl border-2 border-purple-500/50 bg-gradient-to-br from-purple-900/90 to-purple-700/80 shadow-2xl backdrop-blur-xl transition-all duration-500 hover:scale-105">
               <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
               <div className="flex h-full flex-col p-5">
@@ -163,7 +164,6 @@ export default function Home() {
                 <span className="mt-3 text-white/60 text-xs">Style Source</span>
               </div>
             </div>
-
             {/* Target Video Card */}
             <div className="group absolute top-0 left-0 h-80 w-52 overflow-hidden rounded-3xl border-2 border-pink-500/50 bg-gradient-to-br from-pink-900/90 to-pink-700/80 shadow-2xl backdrop-blur-xl transition-all duration-500 hover:scale-105">
               <div className="absolute inset-0 bg-gradient-to-br from-pink-500/20 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
@@ -245,6 +245,7 @@ export default function Home() {
                 </span>
               </div>
             </div>
+
 
             {/* Connection Lines */}
             <svg

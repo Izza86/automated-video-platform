@@ -500,18 +500,18 @@ function buildMoodSegments(
 function extractTexture(cg: FullVideoMetadata["colorGrading"]): TextureDNA {
   const temporalSamples = cg.temporalSamples ?? [];
 
-  // ── Blur pattern: temporal samples where blurLevel > 0.15 ────────────
+  // ── Blur pattern: temporal samples where blurLevel > 0.05 ────────────
   // Compute adaptive radius from ML blur score using the v11 formula.
   const blurPattern = temporalSamples
-    .filter((s) => (s.blurLevel ?? 0) > 0.15)
+    .filter((s) => (s.blurLevel ?? 0) > 0.05)
     .map((s) => ({
       refTime: s.time_sec,
       refDuration: 1.0, // ~1 sample per second from signalstats
       blurLevel: s.blurLevel ?? 0,
-      // v11 adaptive radius: blurLevel 0.15→1, 0.5→3, 1.0→5
+      // v12 adaptive radius: lower threshold, stronger blur
       radius: Math.max(
         1,
-        Math.min(5, Math.round(1 + ((s.blurLevel ?? 0) - 0.15) * 4.7))
+        Math.min(10, Math.round(1 + ((s.blurLevel ?? 0) - 0.05) * 8.0))
       ),
     }));
 

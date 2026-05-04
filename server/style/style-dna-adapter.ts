@@ -137,9 +137,42 @@ function adaptPacing(
     }
   }
 
-  // ── Select top-N candidates by score with minimum spacing ───────────
-  const minGap = Math.max(0.5, pacing.avgShotLen * 0.4);
-  let cutTimestamps = selectTopCandidates(candidates, targetCutCount, minGap);
+  // ── Select candidates using TEMPORAL ANCHORING (v14) ───────────────
+  // We want the TARGET's cuts to respect the REFERENCE's shot structure.
+  // Instead of just picking "best" beats, we look for best beats NEAR
+  // the proportional reference cut timestamps.
+  let cutTimestamps: number[] = [];
+  const minGap = Math.max(0.6, pacing.avgShotLen * 0.45);
+  
+  for (const refCutT of pacing.rawCutTimestamps) {
+    const propTime = (refCutT / dna.sourceDuration) * duration;
+    
+    // Find best candidate within +/- 1.2s of proportional time
+    const localCandidates = candidates
+      .filter(c => Math.abs(c.time - propTime) < 1.2)
+      .sort((a, b) => b.score - a.score);
+      
+    const best = localCandidates[0];
+    if (best) {
+      // Ensure minGap from previous cut
+      const lastCut = cutTimestamps[cutTimestamps.length - 1] ?? -10;
+      if (best.time - lastCut >= minGap) {
+        cutTimestamps.push(best.time);
+      }
+    }
+  }
+
+  // If we still need more cuts to reach density, fill gaps
+  if (cutTimestamps.length < targetCutCount) {
+    const remaining = targetCutCount - cutTimestamps.length;
+    const extra = selectTopCandidates(
+      candidates.filter(c => !cutTimestamps.includes(c.time)),
+      remaining,
+      minGap
+    );
+    cutTimestamps.push(...extra);
+    cutTimestamps.sort((a, b) => a - b);
+  }
 
   // ── Snap to nearest beat if the reference was beat-aligned ──────────
   if (pacing.tempoAlignment > 0.6 && ctx.beatEvents.length > 0) {
@@ -213,36 +246,49 @@ function adaptMotion(
   // If target has no velocity timeline, setptsExpr=null → generator
   // falls back to the reference velocity timeline (proportional).
 
-  // ── Jitter: semantic — map to TARGET's K hardest beats ───────────────
-  // K = number of hard beats in the reference that had intensity > 0.4
-  const refHardBeats = rhythm.beatEvents.filter((b) => b.intensity > 0.4);
-  const K = refHardBeats.length;
-
-  // Sort ref jitter beats by intensity (strongest first) for rank-matching
-  const sortedRefBeats = [...refHardBeats].sort(
+  // ── Jitter: v14 SEMANTIC ANCHOR MAPPING ──────────────────────────────
+  // Instead of rank-matching ("Ref hardest -> Target hardest"), we now
+  // find target moments that MATCH the reference's physical context.
+  const refHardBeats = [...dna.rhythm.beatEvents].sort(
     (a, b) => b.intensity - a.intensity
   );
+  const jitterEvents = refHardBeats
+    .map((refBeat) => {
+      const propTime = (refBeat.timestamp_sec / dna.sourceDuration) * duration;
+      
+      // Candidate target moments: must be a beat hit AND have a motion spike
+      const candidates = ctx.beatEvents.map(b => {
+        const motionAtBeat = ctx.motionData.velocityTimeline?.find(
+          v => Math.abs(v.time_sec - b.timestamp_sec) < 0.1
+        )?.relative_speed ?? 1.0;
+        
+        // Contextual Score: proximity to proportional time + match in intensity/motion
+        const dist = Math.abs(b.timestamp_sec - propTime);
+        const timeScore = 1.0 - (dist / 2.5); // 2.5s window
+        const energyMatch = 1.0 - Math.abs(b.intensity - refBeat.intensity);
+        const motionMatch = motionAtBeat > 1.1 ? 1.2 : 0.8; // Bonus if target is moving here
+        
+        return { 
+          beat: b, 
+          score: (timeScore * 0.5) + (energyMatch * 0.3) + (motionMatch * 0.2) 
+        };
+      }).filter(c => c.score > 0.4);
 
-  // Find the K hardest beats in the target timeline
-  const sortedTargetBeats = [...ctx.beatEvents]
-    .sort((a, b) => b.intensity - a.intensity)
-    .slice(0, K);
+      const best = candidates.sort((a, b) => b.score - a.score)[0];
+      if (!best) return null;
 
-  const jitterEvents = sortedTargetBeats
-    .map((targetBeat, i) => {
-      // Inherit the shake magnitude from the reference's ranked beat
-      const refBeat = sortedRefBeats[i] ?? targetBeat;
-      const t = targetBeat.timestamp_sec;
-      const tEnd = Math.min(duration, t + 0.08);
-      // v11 formula: rotAngle = intensity × 0.0375 (×1.5 boost vs v10)
+      const t = best.beat.timestamp_sec;
+      const tEnd = Math.min(duration, t + 0.18);
+      
+      // Physical decay: intensity scaled by the target's own motion capacity
       return {
         time: t,
         endTime: tEnd,
-        rotAngle: refBeat.intensity * 0.0375,
-        scaleAmount: 1.0 + refBeat.intensity * 0.045,
+        rotAngle: refBeat.intensity * 0.12,
+        scaleAmount: 1.0 + refBeat.intensity * 0.14,
       };
     })
-    .filter((e) => e.time >= 0 && e.time < duration - 0.05)
+    .filter((e): e is NonNullable<typeof e> => !!e)
     .sort((a, b) => a.time - b.time);
 
   const panEvents = (ctx.motionData.motionTimeline ?? [])
@@ -280,13 +326,29 @@ function adaptColor(
     dna.sourceDuration
   );
 
-  // ── CDF curves: timeless histogram transform ─────────────────────────
-  const curvesFilter =
-    moodGradeSegments.length > 0
-      ? null
-      : color.histogramCdf
-        ? buildCDFCurvesFilter(color.histogramCdf)
-        : null;
+  // ── CDF curves: PROPER HISTOGRAM MATCHING ────────────────────────────
+  // Maps target pixel values to reference pixel values via CDF matching.
+  // For each target value i, find reference value j where refCDF[j] ≈ targetCDF[i]
+  let curvesFilter: string | null = null;
+
+  // Validation: Log target histogram status (MUST show number, never 'MISSING')
+  const targetHistPoints = ctx.targetHistogramCdf?.r?.length ?? 0;
+  console.log(`[color-transfer] target histogram points: ${targetHistPoints > 0 ? targetHistPoints : 'MISSING'}`);
+
+  if (color.histogramCdf && ctx.targetHistogramCdf) {
+    curvesFilter = buildCDFCurvesFilter(ctx.targetHistogramCdf, color.histogramCdf);
+
+    // Validation: Log both reference and target color characteristics
+    const refMeanR = color.histogramCdf.r.reduce((a, b, i) => a + b * i, 0) / 255;
+    const refMeanB = color.histogramCdf.b.reduce((a, b, i) => a + b * i, 0) / 255;
+    const tgtMeanR = ctx.targetHistogramCdf.r.reduce((a, b, i) => a + b * i, 0) / 255;
+    const tgtMeanB = ctx.targetHistogramCdf.b.reduce((a, b, i) => a + b * i, 0) / 255;
+    console.log(`[color-transfer] REF histogram mean: R=${refMeanR.toFixed(2)}, B=${refMeanB.toFixed(2)} (${refMeanR > refMeanB ? 'WARM' : 'COOL'})`);
+    console.log(`[color-transfer] TARGET histogram mean: R=${tgtMeanR.toFixed(2)}, B=${tgtMeanB.toFixed(2)} (${tgtMeanR > tgtMeanB ? 'WARM' : 'COOL'})`);
+    console.log(`[color-transfer] Histogram matching: target→reference LUT built`);
+  } else {
+    console.warn(`[color-transfer] ⚠ Missing histograms - ref=${!!color.histogramCdf}, target=${!!ctx.targetHistogramCdf} - color transfer disabled`);
+  }
 
   // ── Temporal sendcmd: SEMANTIC energy-level matching ─────────────────
   // High-energy reference samples → target's high-energy beat regions.
@@ -398,26 +460,58 @@ function adaptRhythm(
   );
   const classified = rhythm.classifiedBeats ?? [];
   const beatResponseEvents = classified
-    .map((c, i) => {
-      const tBeat =
-        sortedTargetBeatsByIntensity[
-          i % Math.max(1, sortedTargetBeatsByIntensity.length)
-        ];
-      if (!tBeat) return null;
-      const t = tBeat.timestamp_sec;
-      const endTime = Math.min(
-        duration,
-        t + (c.class === "drop_moment" ? 0.14 : 0.08)
+    .map((c) => {
+      // PROXIMITY-AWARE SEMANTIC MAPPING (v12)
+      // Find the target beat closest to the proportional timestamp of the reference beat
+      const propTime = (c.refTime / dna.sourceDuration) * duration;
+      
+      // Filter target beats within a 1.5s window of the proportional time
+      const candidates = ctx.beatEvents.filter(b => 
+        Math.abs(b.timestamp_sec - propTime) < 1.5
       );
 
+      // Pick the best target beat in this window:
+      // Weighting: 70% proximity, 30% intensity similarity
+      let bestTarget = candidates[0];
+      let bestScore = -1;
+
+      for (const b of candidates) {
+        const timeDist = Math.abs(b.timestamp_sec - propTime);
+        const timeScore = 1.0 - (timeDist / 1.5);
+        const intensityScore = 1.0 - Math.abs(b.intensity - c.intensity);
+        const totalScore = (timeScore * 0.7) + (intensityScore * 0.3);
+
+        if (totalScore > bestScore) {
+          bestScore = totalScore;
+          bestTarget = b;
+        }
+      }
+
+      // Fallback: if no candidates in window, pick the closest one globally
+      if (!bestTarget && ctx.beatEvents.length > 0) {
+        bestTarget = ctx.beatEvents.reduce((prev, curr) => 
+          Math.abs(curr.timestamp_sec - propTime) < Math.abs(prev.timestamp_sec - propTime) ? curr : prev
+        );
+      }
+
+      if (!bestTarget) return null;
+
+      const t = bestTarget.timestamp_sec;
+      // BUG FIX: Flash duration reduced to 0.05-0.1s for crisp visible effect
+      const endTime = Math.min(
+        duration,
+        t + (c.class === "drop_moment" ? 0.10 : 0.06)
+      );
+
+      // BUG FIX: Beat flash brightness increased to visible levels (0.15-0.25 range)
       if (c.class === "hard_kick") {
         return {
           time: t,
           endTime,
           kind: "zoom_punch" as const,
-          brightness: 0,
-          contrast: 1.04 + c.intensity * 0.08,
-          zoom: 1.02 + c.intensity * 0.08,
+          brightness: 0.15 + c.intensity * 0.10, // 0.15-0.25 visible flash
+          contrast: 1.1 + c.intensity * 0.15,
+          zoom: 1.05 + c.intensity * 0.15,
           rotation: 0,
           velocityRamp: 1.0,
         };
@@ -428,10 +522,10 @@ function adaptRhythm(
           time: t,
           endTime,
           kind: "micro_shake" as const,
-          brightness: 0,
-          contrast: 1.02 + c.intensity * 0.05,
-          zoom: 1.0,
-          rotation: 0.006 + c.intensity * 0.02,
+          brightness: 0.10 + c.intensity * 0.10, // 0.10-0.20 visible flash
+          contrast: 1.05 + c.intensity * 0.1,
+          zoom: 1.02 + c.intensity * 0.05,
+          rotation: 0.015 + c.intensity * 0.04,
           velocityRamp: 1.0,
         };
       }
@@ -441,7 +535,7 @@ function adaptRhythm(
           time: t,
           endTime,
           kind: "light_flicker" as const,
-          brightness: 0.01 + c.intensity * 0.03,
+          brightness: 0.08 + c.intensity * 0.12, // 0.08-0.20 visible flash
           contrast: 1.0,
           zoom: 1.0,
           rotation: 0,
@@ -453,10 +547,10 @@ function adaptRhythm(
         time: t,
         endTime,
         kind: "drop_combo" as const,
-        brightness: 0.02 + c.intensity * 0.05,
-        contrast: 1.1 + c.intensity * 0.18,
-        zoom: 1.04 + c.intensity * 0.1,
-        rotation: 0.01 + c.intensity * 0.02,
+        brightness: 0.20 + c.intensity * 0.15, // 0.20-0.35 strong flash for drops
+        contrast: 1.2 + c.intensity * 0.3,
+        zoom: 1.08 + c.intensity * 0.2,
+        rotation: 0.03 + c.intensity * 0.05,
         velocityRamp: 1.05 + c.intensity * 0.25,
       };
     })
@@ -643,38 +737,70 @@ function findNearestBeat(
 }
 
 /**
- * Build the FFmpeg curves filter string from a per-channel CDF.
+ * Build the FFmpeg curves filter string using PROPER HISTOGRAM MATCHING.
  *
- * Samples the CDF at 32 points (step=8) and builds a master + r/g/b
- * curves filter for statistical colour matching.
- * This is TIMELESS — no timeline mapping needed, just histogram maths.
+ * For each target pixel value i, finds the reference pixel value j such that
+ * targetCDF[i] ≈ refCDF[j]. This maps the target's tonal distribution to match
+ * the reference's tonal distribution.
+ *
+ * @param targetCdf - Target video's histogram CDF (source for mapping)
+ * @param refCdf - Reference video's histogram CDF (destination for mapping)
+ * @returns FFmpeg curves filter string
  */
-function buildCDFCurvesFilter(cdf: {
-  r: number[];
-  g: number[];
-  b: number[];
-}): string {
-  const buildChannelCurve = (cdfArr: number[]): string => {
+function buildCDFCurvesFilter(
+  targetCdf: { r: number[]; g: number[]; b: number[] },
+  refCdf: { r: number[]; g: number[]; b: number[] }
+): string {
+  /**
+   * Compute histogram matching LUT: for each target value, find matching ref value.
+   * Algorithm: For target value i with CDF value targetCdf[i], find ref value j
+   * where refCdf[j] is closest to targetCdf[i].
+   */
+  const matchHistogram = (tgtArr: number[], refArr: number[]): number[] => {
+    const lut = new Array(256);
+    let lastRefJ = 0;
+
+    for (let i = 0; i < 256; i++) {
+      const targetVal = tgtArr[i];
+      let bestJ = lastRefJ;
+
+      // Since CDFs are monotonic, continue from where we left off
+      for (let j = lastRefJ; j < 256; j++) {
+        if (refArr[j] >= targetVal) {
+          bestJ = j;
+          break;
+        }
+        bestJ = j;
+      }
+      lut[i] = bestJ;
+      lastRefJ = bestJ;
+    }
+    return lut;
+  };
+
+  // Compute matching LUTs for each channel
+  const rLut = matchHistogram(targetCdf.r, refCdf.r);
+  const gLut = matchHistogram(targetCdf.g, refCdf.g);
+  const bLut = matchHistogram(targetCdf.b, refCdf.b);
+
+  // Build FFmpeg curves format: r='0/0.1 0.5/0.6 1/0.9'
+  const buildChannelCurve = (lut: number[]): string => {
     const points: string[] = [];
     for (let i = 0; i <= 255; i += 8) {
-      const inVal = (Math.min(255, i) / 255).toFixed(4);
-      const outVal = Math.max(0, Math.min(1, cdfArr[Math.min(255, i)])).toFixed(
-        4
-      );
+      const inVal = (i / 255).toFixed(4);
+      const outVal = (lut[i] / 255).toFixed(4);
       points.push(`${inVal}/${outVal}`);
     }
     // Always include the 1.0 endpoint
-    points.push(`1/${Math.max(0, Math.min(1, cdfArr[255])).toFixed(4)}`);
+    points.push(`1/${(lut[255] / 255).toFixed(4)}`);
     return points.join(" ");
   };
 
-  const masterCdf = cdf.r.map((r, i) => (r + cdf.g[i] + cdf.b[i]) / 3);
-  const masterCurve = buildChannelCurve(masterCdf);
-  const rCurve = buildChannelCurve(cdf.r);
-  const gCurve = buildChannelCurve(cdf.g);
-  const bCurve = buildChannelCurve(cdf.b);
+  const rCurve = buildChannelCurve(rLut);
+  const gCurve = buildChannelCurve(gLut);
+  const bCurve = buildChannelCurve(bLut);
 
-  return `curves=master='${masterCurve}':r='${rCurve}':g='${gCurve}':b='${bCurve}'`;
+  return `curves=r='${rCurve}':g='${gCurve}':b='${bCurve}'`;
 }
 
 /**

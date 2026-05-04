@@ -1,0 +1,21 @@
+# STRIPE PAYMENT SETUP
+# Get these from: https://dashboard.stripe.com/apikeys
+
+STRIPE_SECRET_KEY=sk_test_your_secret_key_here
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
+
+# STRIPE PRICE IDs
+# Create products in Stripe Dashboard, then copy price IDs
+NEXT_PUBLIC_STRIPE_PRO_MONTHLY_PRICE_ID=price_1...
+NEXT_PUBLIC_STRIPE_PRO_YEARLY_PRICE_ID=price_1...
+NEXT_PUBLIC_STRIPE_BUSINESS_MONTHLY_PRICE_ID=price_1...
+NEXT_PUBLIC_STRIPE_BUSINESS_YEARLY_PRICE_ID=price_1...
+
+# YOUR APP URL
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# OPENAI (for AI Chatbot)
+OPENAI_API_KEY=sk-your_openai_api_key_here
+
+# CLAUDE AI (for video editing)
+ANTHROPIC_API_KEY=your_anthropic_api_key_here

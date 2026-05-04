@@ -106,10 +106,14 @@ def analyze_shots_live(width, height, fps=5, max_frames=None):
     return {"shotCount": shot_id + 1, "mlModel": model_name}
 
 def analyze_shots(video_path, fps=5):
-    """Fallback for non-stdin processing of a file."""
+    """Analyze shots from a video file using TransNetV2 or classical histogram detection."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video: {video_path}")
+    
+    total_frames_in_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_fps = cap.get(cv2.CAP_PROP_FPS) or fps
+    duration = total_frames_in_video / video_fps if video_fps > 0 else 0
     
     all_frames = []
     while True:
@@ -119,29 +123,91 @@ def analyze_shots(video_path, fps=5):
         all_frames.append(small)
     cap.release()
     
-    if not all_frames: return {"shots": [], "shotCount": 0, "mlModel": "none"}
+    if not all_frames:
+        return {"shots": [], "boundaries": [], "shotCount": 0, "cutCount": 0,
+                "gradualCount": 0, "avgShotDuration": 0, "mlModel": "none"}
     
     frames_np = np.array(all_frames)
     preds, model_name = try_transnetv2(frames_np)
     
-    shot_id = 0
-    results = []
+    # Build is_cut list and collect cut scores
     is_cut_list = []
+    cut_scores = []
     if preds is not None:
         is_cut_list = (preds > 0.5).tolist()
+        cut_scores = [float(p) for p in preds]
     else:
         cuts, model_name = detect_shots_classical(frames_np)
         is_cut_list = [False] * len(all_frames)
-        for c in cuts: is_cut_list[c["index"]] = True
-        
+        cut_scores = [0.0] * len(all_frames)
+        for c in cuts:
+            is_cut_list[c["index"]] = True
+            cut_scores[c["index"]] = min(1.0, c["score"] / max(1.0, c["score"]))
+    
+    # Build shots[] and boundaries[] in the format TypeScript expects
+    shot_id = 0
+    cut_indices = []
     for i, is_cut in enumerate(is_cut_list):
-        if is_cut: shot_id += 1
-        results.append({
-            "timestamp": round(i / fps, 4),
-            "shot": {"shot_id": shot_id, "is_cut": is_cut, "model": model_name}
+        if is_cut:
+            shot_id += 1
+            cut_indices.append(i)
+    
+    total_shots = shot_id + 1
+    
+    # Build shots array: each shot has start_sec, end_sec, confidence, type
+    shots = []
+    boundaries = []
+    prev_time = 0.0
+    for ci in cut_indices:
+        cut_time = round(ci / fps, 4)
+        confidence = cut_scores[ci] if ci < len(cut_scores) else 0.5
+        # Shot segment before this cut
+        shots.append({
+            "start_sec": prev_time,
+            "end_sec": cut_time,
+            "confidence": float(confidence),
+            "type": "hard_cut"
+        })
+        # Boundary record
+        boundaries.append({
+            "time_sec": cut_time,
+            "type": "hard_cut",
+            "confidence": float(confidence),
+            "score": float(cut_scores[ci]) if ci < len(cut_scores) else 0.5
+        })
+        prev_time = cut_time
+    
+    # Last shot segment (after last cut to end)
+    end_time = round(len(all_frames) / fps, 4) if fps > 0 else duration
+    if prev_time < end_time:
+        shots.append({
+            "start_sec": prev_time,
+            "end_sec": end_time,
+            "confidence": 1.0,
+            "type": "segment"
         })
     
-    return {"shotCount": shot_id + 1, "mlModel": model_name, "shotTimeline": results}
+    # Compute shot duration stats
+    shot_durations = [s["end_sec"] - s["start_sec"] for s in shots if s["end_sec"] > s["start_sec"]]
+    avg_dur = sum(shot_durations) / len(shot_durations) if shot_durations else duration
+    min_dur = min(shot_durations) if shot_durations else duration
+    max_dur = max(shot_durations) if shot_durations else duration
+    
+    hard_cuts = len(cut_indices)
+    
+    sys.stderr.write(f"[shots] Result: model={model_name} shots={total_shots} cuts={hard_cuts} avg_dur={avg_dur:.2f}s\n")
+    
+    return {
+        "shots": shots,
+        "boundaries": boundaries,
+        "shotCount": total_shots,
+        "cutCount": hard_cuts,
+        "gradualCount": 0,
+        "avgShotDuration": round(avg_dur, 4),
+        "minShotDuration": round(min_dur, 4),
+        "maxShotDuration": round(max_dur, 4),
+        "mlModel": model_name
+    }
 
 def main():
     import time as _time

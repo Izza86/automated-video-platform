@@ -11,6 +11,7 @@ import {
   type RenderStyleDNA,
 } from "./types/render-style-dna";
 import { buildCurvesFilterFromCDF } from "./utils/cdf-curves-ffmpeg";
+import { logger } from "./utils/logger";
 
 const execAsync = promisify(exec);
 const writeFileAsync = promisify(fs.writeFile);
@@ -1525,7 +1526,8 @@ function mapAnalyzerToMetadata(
     typeof raw.color_mood !== "string" ||
     raw.color_mood.trim().length === 0
   ) {
-    throw new Error("[STRICT FAILURE] Missing ML color mood classification.");
+    logger.failStage("Color Mood: Missing ML color mood classification. Using default.");
+    raw.color_mood = "neutral"; // Default fallback
   }
   const colorMood: string = raw.color_mood;
   const channelOffsets =

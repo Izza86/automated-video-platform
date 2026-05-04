@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 interface LampAuthSceneProps {
@@ -14,6 +14,16 @@ export function LampAuthScene({
 }: LampAuthSceneProps) {
   const [isOn, setIsOn] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
+  const [isBlinking, setIsBlinking] = useState(false);
+
+  // Eye blink every minute
+  useEffect(() => {
+    const blinkInterval = setInterval(() => {
+      setIsBlinking(true);
+      setTimeout(() => setIsBlinking(false), 200);
+    }, 60000);
+    return () => clearInterval(blinkInterval);
+  }, []);
 
   const pullString = useCallback(() => {
     setIsPulling(true);
@@ -95,16 +105,29 @@ export function LampAuthScene({
                 fill="url(#shadeGrad)"
               />
 
-              {/* Eyes */}
-              <circle cx="108" cy="156" fill="#1d1038" r="5" />
-              <circle cx="152" cy="156" fill="#1d1038" r="5" />
-              {/* Mouth */}
+              {/* Eyes - with blink animation */}
+              <circle 
+                cx="108" 
+                cy="156" 
+                fill="#1d1038" 
+                r={isBlinking ? "0.5" : "5"} 
+                className="transition-all duration-150"
+              />
+              <circle 
+                cx="152" 
+                cy="156" 
+                fill="#1d1038" 
+                r={isBlinking ? "0.5" : "5"} 
+                className="transition-all duration-150"
+              />
+              {/* Mouth - smile when on */}
               <path
-                d="M112 176 Q130 190 148 176"
+                d={isOn ? "M112 176 Q130 195 148 176" : "M112 176 Q130 190 148 176"}
                 fill="none"
                 stroke="#1d1038"
                 strokeLinecap="round"
                 strokeWidth="4"
+                className="transition-all duration-300"
               />
 
               {/* Bulb */}
@@ -149,30 +172,59 @@ export function LampAuthScene({
               />
             </svg>
 
-            {/* Pull string — inside cap */}
-            <div className="-translate-x-1/2 absolute top-[78px] left-1/2 z-20">
+              {/* Pull string — ONLY hanging down from bulb area */}
+            <div className="-translate-x-1/2 absolute top-[244px] left-[50%] z-30">
               <button
                 aria-label="Pull cord to toggle lamp"
                 className="flex cursor-pointer flex-col items-center"
                 onClick={pullString}
                 type="button"
               >
+                {/* Cord hanging down ONLY - no upper wire */}
                 <span
                   className={cn(
-                    "block w-[2px] rounded-full bg-violet-200/80 transition-all duration-200",
-                    isPulling ? "h-[110px]" : "h-[88px]"
+                    "block w-[2px] rounded-full bg-amber-100/90 transition-all duration-300",
+                    isPulling ? "h-[100px]" : "h-[80px]"
                   )}
                 />
                 <span
                   className={cn(
-                    "mt-1 h-5 w-5 rounded-full border border-white/30 transition-all duration-200",
+                    "mt-1 h-4 w-4 rounded-full border border-white/30 transition-all duration-200",
                     isOn
-                      ? "bg-violet-300 shadow-[0_0_14px_rgba(168,85,247,0.9)]"
-                      : "bg-violet-200/80",
-                    isPulling && "translate-y-2"
+                      ? "bg-amber-400 shadow-[0_0_14px_rgba(251,191,36,0.9)]"
+                      : "bg-amber-200/80",
+                    isPulling && "translate-y-3 scale-110"
                   )}
                 />
               </button>
+            </div>
+
+            {/* Bright yellow light from bottom when pulled - INCREASED */}
+            <div
+              className={cn(
+                "-translate-x-1/2 pointer-events-none absolute bottom-[60px] left-1/2 z-10 transition-all duration-700",
+                isOn ? "opacity-100 scale-125" : "opacity-0 scale-100"
+              )}
+            >
+              {/* Intense yellow glow - BRIGHTER */}
+              <div 
+                className="h-40 w-56 rounded-full blur-3xl"
+                style={{
+                  background: "radial-gradient(ellipse, rgba(251,191,36,1) 0%, rgba(251,191,36,0.8) 20%, rgba(251,191,36,0.5) 40%, rgba(168,85,247,0.3) 60%, transparent 100%)",
+                  boxShadow: isOn ? "0 0 120px 60px rgba(251,191,36,0.9), 0 0 240px 120px rgba(251,191,36,0.6), 0 0 400px 200px rgba(251,191,36,0.3)" : "none"
+                }}
+              />
+              {/* Light rays - STRONGER */}
+              <div 
+                className={cn(
+                  "absolute -top-16 left-1/2 -translate-x-1/2 w-48 h-28 transition-all duration-700",
+                  isOn ? "opacity-100" : "opacity-0"
+                )}
+                style={{
+                  background: "linear-gradient(to bottom, rgba(251,191,36,0.9) 0%, rgba(251,191,36,0.4) 50%, transparent 100%)",
+                  filter: "blur(10px)"
+                }}
+              />
             </div>
 
             {/* Light cone */}
@@ -205,16 +257,31 @@ export function LampAuthScene({
           </div>
         </section>
 
-        {/* ─── Right: Auth form only (no nav cards) ─── */}
+        {/* ─── Right: Auth form with dark pinkish shadow ─── */}
         <section className="flex flex-[1.3] items-center justify-center p-4 pb-10 md:p-10">
           <div
             className={cn(
-              "w-full max-w-xl transition-all duration-500",
+              "w-full max-w-xl transition-all duration-500 relative",
               isOn
                 ? "translate-y-0 opacity-100"
                 : "pointer-events-none translate-y-5 opacity-0"
             )}
+            style={{
+              boxShadow: isOn 
+                ? "0 0 60px 20px rgba(236, 72, 153, 0.4), 0 0 100px 40px rgba(168, 85, 247, 0.2), inset 0 0 60px rgba(236, 72, 153, 0.1)" 
+                : "0 0 40px 10px rgba(236, 72, 153, 0.15), 0 0 80px 20px rgba(168, 85, 247, 0.1)",
+              borderRadius: "24px"
+            }}
           >
+            {/* Glow effect behind form */}
+            <div 
+              className="absolute -inset-4 rounded-[32px] -z-10 blur-2xl transition-all duration-700"
+              style={{
+                background: isOn 
+                  ? "radial-gradient(ellipse, rgba(236, 72, 153, 0.5) 0%, rgba(168, 85, 247, 0.3) 50%, transparent 70%)"
+                  : "radial-gradient(ellipse, rgba(236, 72, 153, 0.2) 0%, rgba(168, 85, 247, 0.1) 50%, transparent 70%)"
+              }}
+            />
             {children}
           </div>
 
